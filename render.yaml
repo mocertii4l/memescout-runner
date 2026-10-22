@@ -1,0 +1,16 @@
+services:
+  - type: worker
+    name: memescout-runner
+    runtime: docker
+    plan: 0.5c-512mb
+    region: frankfurt
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: DESK_ORIGIN
+        sync: false
+      - key: FAST_RUNNER_SECRET
+        generateValue: true
+      - key: POLL_INTERVAL_MS
+        value: "15000"
