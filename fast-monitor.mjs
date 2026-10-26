@@ -12,6 +12,10 @@ process.on('SIGINT',()=>{stopping=true;});
 while(!stopping){
  const started=Date.now();
  try {
+  const scalp=await fetch(endpoint.replace('/runTradingCycle','/scalper'),{method:'POST',headers:{'content-type':'application/json','X-Desk-Runner-Secret':secret},body:'{}',signal:AbortSignal.timeout(45000)});
+  console.log(new Date().toISOString()+' paper scalper HTTP '+scalp.status);
+ }catch{console.log(new Date().toISOString()+' scalper check failed');}
+ try {
   const res=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json','X-Desk-Runner-Secret':secret},body:JSON.stringify({mode:'exits-only'}),signal:AbortSignal.timeout(45000)});
   if(res.status===401||res.status===403)throw Error('Runner authentication failed; check matching secrets');
   if(res.status>=500||res.status===409) console.log(new Date().toISOString()+' monitor skipped or failed: HTTP '+res.status);
