@@ -1,6 +1,6 @@
 // Read-only creation feed. No paid trade-event subscriptions, signing or broadcast.
-const origin=new URL(process.env.DESK_ORIGIN||'https://invalid.invalid');
-const secret=process.env.FAST_RUNNER_SECRET||'';
+const origin=new URL(process.env.DESK_ORIGIN?.trim()||'https://invalid.invalid');
+const secret=process.env.FAST_RUNNER_SECRET?.trim()||'';
 if(origin.protocol!=='https:'||!origin.hostname.endsWith('.base44.app')||secret.length<32)throw Error('Set published DESK_ORIGIN and matching FAST_RUNNER_SECRET (32+ characters).');
 const endpoint=origin.origin+'/api/apps/6ad7c656869fa3aa4790306f/functions/launchLab';
 const queue=[];let dropped=0,socket,stopping=false,backoff=1000,connected=false;
@@ -33,7 +33,13 @@ while(!stopping){
  try{
   const r=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json','X-Desk-Runner-Secret':secret},
    body:JSON.stringify({events:batch,stream_connected:connected,dropped:batchDropped}),signal:AbortSignal.timeout(45000)});
-  if(r.status===401||r.status===403){console.error('Launch runner authentication failed; stopping.');stop();process.exitCode=1;}
+  if(r.status===401||r.status===403){
+   const detail=await r.json().catch(()=>({}));
+   const code=['SERVER_SECRET_MISSING','SERVER_SECRET_TOO_SHORT','RUNNER_HEADER_MISSING','RUNNER_SECRET_MISMATCH'].includes(detail.code)?detail.code:'AUTH_REJECTED';
+   console.error('Launch runner authentication failed: '+code+'; retrying in 60 seconds. Verify matching Render and Base44 secret.');
+   dropped+=batch.length+batchDropped;
+   await new Promise(resolve=>setTimeout(resolve,45000));
+  }
   else if(!r.ok){queue.unshift(...batch);dropped+=batchDropped;console.log('Launch cycle unavailable: HTTP '+r.status);}
   else{const b=await r.json();if(b.waiting){queue.unshift(...batch);dropped+=batchDropped;}console.log('Launch paper cycle completed; received batch '+batch.length);}
  }catch{queue.unshift(...batch);dropped+=batchDropped;console.log('Launch endpoint unavailable; queued signals expire after 55 seconds.');}
