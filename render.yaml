@@ -14,3 +14,5 @@ services:
         generateValue: true
       - key: POLL_INTERVAL_MS
         value: "15000"
+      - key: SCALP_INTERVAL_MS
+        value: "5000"
