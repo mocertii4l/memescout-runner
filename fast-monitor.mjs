@@ -1,6 +1,6 @@
 // Exit-only poller for an always-on Node 22+ host. Never signs or sends transactions.
-const origin=process.env.DESK_ORIGIN;
-const secret=process.env.FAST_RUNNER_SECRET;
+const origin=process.env.DESK_ORIGIN?.trim();
+const secret=process.env.FAST_RUNNER_SECRET?.trim();
 const interval=Math.max(10000,Number(process.env.POLL_INTERVAL_MS)||15000);
 if(!origin||!secret||secret.length<32)throw Error('Configure DESK_ORIGIN and a matching FAST_RUNNER_SECRET of at least 32 characters.');
 const u=new URL(origin);
@@ -13,7 +13,9 @@ while(!stopping){
  const started=Date.now();
  try {
   const scalp=await fetch(endpoint.replace('/runTradingCycle','/scalper'),{method:'POST',headers:{'content-type':'application/json','X-Desk-Runner-Secret':secret},body:'{}',signal:AbortSignal.timeout(45000)});
-  console.log(new Date().toISOString()+' paper scalper HTTP '+scalp.status);
+  const detail=await scalp.json().catch(()=>({}));
+  const code=['SERVER_SECRET_MISSING','SERVER_SECRET_TOO_SHORT','RUNNER_HEADER_MISSING','RUNNER_SECRET_MISMATCH'].includes(detail.code)?detail.code:'';
+  console.log(new Date().toISOString()+' paper scalper HTTP '+scalp.status+(code?' '+code:''));
  }catch{console.log(new Date().toISOString()+' scalper check failed');}
  try {
   const res=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json','X-Desk-Runner-Secret':secret},body:JSON.stringify({mode:'exits-only'}),signal:AbortSignal.timeout(45000)});
