@@ -9,12 +9,14 @@ if(!origin||!secret||secret.length<32)throw Error('Configure DESK_ORIGIN and a m
 const u=new URL(origin);
 if(u.protocol!=='https:'||!u.hostname.endsWith('.base44.app')||u.username||u.password)throw Error('DESK_ORIGIN must be your published HTTPS Base44 app origin.');
 const base=u.origin+'/api/apps/6ad7c656869fa3aa4790306f/functions/';
-let stopping=false;
+let stopping=false,backendCooldownUntil=0;
 process.on('SIGTERM',()=>{stopping=true;});
 process.on('SIGINT',()=>{stopping=true;});
 console.log('Paper monitor cadence: scalper '+scalpInterval+'ms; V1 exits '+mainInterval+'ms; discovery '+discoveryInterval+'ms; independent loops');
 async function poll(name,interval,body){
  while(!stopping){
+  while(!stopping&&Date.now()<backendCooldownUntil)await new Promise(resolve=>setTimeout(resolve,Math.min(1000,backendCooldownUntil-Date.now())));
+  if(stopping)break;
   const started=Date.now();let backoff=0;
   try{
    const r=await fetch(base+name,{method:'POST',headers:{'content-type':'application/json','X-Desk-Runner-Secret':secret},body:JSON.stringify(body),signal:AbortSignal.timeout(45000)});
@@ -24,6 +26,9 @@ async function poll(name,interval,body){
    if(r.status===401||r.status===403)backoff=60000;
    else if(r.status===429)backoff=Math.max(30000,Math.min(300000,(Number(r.headers.get('retry-after'))||30)*1000));
    else if(r.status>=500)backoff=15000;
+   if(r.status===429)backendCooldownUntil=Math.max(backendCooldownUntil,Date.now()+backoff);
+   // Idle books do not need five-second database sweeps. Open scalp positions retain the fast cadence.
+   if(r.ok&&name==='scalper'&&detail.open_positions===0)backoff=Math.max(backoff,30000);
   }catch{backoff=15000;console.log(new Date().toISOString()+' '+name+' request failed; backing off');}
   // No overlapping calls to the same endpoint, even when a cycle exceeds its target cadence.
   const pause=Math.max(1000,interval-(Date.now()-started),backoff);
