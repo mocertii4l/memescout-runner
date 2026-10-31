@@ -49,12 +49,15 @@ export function createCurvePaperBroker({ feeBps = 125, gasSol = 0.0005, model = 
       const p = pos.get(req.market);
       if (!p?.tokens) return { order_id: id, status: 'rejected', reason: 'no_position', ledger: model };
       if (pessimistic && rand() < P.fail_rate) return failed(id, req, 'sell');
-      const q = quoteSell(c0, p.tokens, feeBps);
+      const fraction = req.fraction > 0 && req.fraction < 1 ? req.fraction : 1;
+      const tokens = p.tokens * fraction, costPart = p.cost_sol * fraction;
+      const q = quoteSell(c0, tokens, feeBps);
       const solOut = q.solOut * (pessimistic ? 1 - P.extra_slippage_bps / 1e4 : 1);
-      const pnlSol = solOut - txCost() - p.cost_sol;
-      pos.delete(req.market);
+      const pnlSol = solOut - txCost() - costPart;
+      if (fraction < 1) pos.set(req.market, { ...p, tokens: p.tokens - tokens, cost_sol: p.cost_sol - costPart });
+      else pos.delete(req.market);
       // A graduated curve can't really be sold into (liquidity moved to PumpSwap); paper closes at the final curve and flags it.
-      const res = { order_id: id, status: 'filled', side: 'sell', ledger: model, graduated: c0.complete || undefined, fill_price_sol: solOut / p.tokens, curve_price_sol: spotPriceSol(c0), qty: p.tokens, fee_sol: q.feeSol + txCost(), sol_out: solOut, realized_sol: pnlSol, realized_usd: pnlSol * req.sol_usd };
+      const res = { order_id: id, status: 'filled', side: 'sell', ledger: model, graduated: c0.complete || undefined, fill_price_sol: solOut / tokens, curve_price_sol: spotPriceSol(c0), qty: tokens, fraction, fee_sol: q.feeSol + txCost(), sol_out: solOut, realized_sol: pnlSol, realized_usd: pnlSol * req.sol_usd };
       onFill({ ...req, ...res });
       return res;
     },

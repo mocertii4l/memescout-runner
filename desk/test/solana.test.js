@@ -78,14 +78,16 @@ function fakeWorld() {
   };
   function addLaunch({ mint, sold = 250_000_000, solIn = 8, mintAuthority = null, whale = 0 }) {
     const vt = 1_073_000_000 - sold, vs = (30 * 1_073_000_000) / vt;
-    curves.set(`curve-${mint}`, curveBuf({ vt: BigInt(vt) * 10n ** 6n, vs: BigInt(Math.round(vs * 1e9)), rt: (793_100_000n - BigInt(sold)) * 10n ** 6n, rs: BigInt(Math.round(solIn * 1e9)) }));
+    // Real SOL curves: virtual SOL = real SOL + 30 (verified on mainnet). solIn is kept only for call compatibility.
+    const vsL = BigInt(Math.round(vs * 1e9));
+    curves.set(`curve-${mint}`, curveBuf({ vt: BigInt(vt) * 10n ** 6n, vs: vsL, rt: (793_100_000n - BigInt(sold)) * 10n ** 6n, rs: vsL - 30n * 10n ** 9n }));
     mints.set(mint, { mint_authority: mintAuthority, freeze_authority: null });
     holders.set(mint, [{ amount: 793_100_000 - sold + 206_900_000 }, ...(whale ? [{ amount: whale }] : []), ...Array.from({ length: 15 }, () => ({ amount: 4_000_000 }))]);
   }
   function pump(mint, factor) {
     const c = decodeCurve(curves.get(`curve-${mint}`));
     const vs = Number(c.virtualSolReserves) * factor, vt = (Number(c.virtualSolReserves) * Number(c.virtualTokenReserves)) / vs;
-    curves.set(`curve-${mint}`, curveBuf({ vt: BigInt(Math.round(vt)), vs: BigInt(Math.round(vs)), rt: c.realTokenReserves, rs: c.realSolReserves }));
+    curves.set(`curve-${mint}`, curveBuf({ vt: BigInt(Math.round(vt)), vs: BigInt(Math.round(vs)), rt: c.realTokenReserves, rs: BigInt(Math.round(vs)) - 30n * 10n ** 9n }));
   }
   return { rpc, addLaunch, pump };
 }
@@ -124,7 +126,15 @@ test('end to end: hard facts veto, a clean launch enters, take-profit exits and 
   assert.ok(desk.book.open, 'no exit condition yet');
   w.pump('GOOD', 1.4); // price up ~96%
   await desk.manageExit();
+  assert.ok(desk.book.open?.partialDone, 'first +30% sells half and keeps the rest running');
+  const half = desk.pessBroker.position('GOOD').tokens;
+  assert.ok(half > 0);
+  await desk.manageExit();
+  assert.ok(desk.book.open, 'no trailing exit while price holds at the peak');
+  w.pump('GOOD', 0.92); // ~-15% from the peak: trailing stop
+  await desk.manageExit();
   assert.equal(desk.book.open, null);
+  assert.equal(desk.pessBroker.position('GOOD').tokens, 0);
   assert.ok(desk.stats.realized_usd > 0, `expected profit, got ${desk.stats.realized_usd}`);
   assert.ok(desk.stats.realized_usd_optimistic > desk.stats.realized_usd, 'pessimistic ledger must do worse than optimistic');
 
@@ -234,4 +244,65 @@ test('loose profile trades what strict rejects, without touching the strict desk
   assert.equal(a.account.exposure_usd, 0, 'loose exposure stays out of the account');
   assert.equal(a.account.open_positions, 0);
   assert.ok(a.statuses.some((s) => s.runner === 'solana-loose'));
+});
+
+import { isSolQuotedCurve } from '../feeds/pumpcurve.js';
+
+test('real mainnet curve shapes: SOL curves pass, other-quote curves are rejected', () => {
+  // Reserves copied from mainnet accounts sampled Oct 2026.
+  const sol = { virtualSolReserves: 51718626807n, realSolReserves: 21718626807n };
+  const other = { virtualSolReserves: 1214625502448n, realSolReserves: 445514297963n };
+  assert.equal(isSolQuotedCurve(sol), true);
+  assert.equal(isSolQuotedCurve(other), false);
+});
+
+test('hard facts: risky Token-2022 extensions, non-SOL curves, and RPC throttling are named, not guessed', async () => {
+  let t = 0;
+  const w = fakeWorld();
+  w.addLaunch({ mint: 'TAX' }); w.addLaunch({ mint: 'OTHERQ' }); w.addLaunch({ mint: 'SLOW' });
+  const rpc = { ...w.rpc,
+    async mintInfo(m) { const i = await w.rpc.mintInfo(m); return m === 'TAX' ? { ...i, extensions: ['metadataPointer', 'transferFeeConfig'] } : { ...i, extensions: ['metadataPointer', 'tokenMetadata'] }; },
+    async curve(k) { const c = await w.rpc.curve(k); return k === 'curve-OTHERQ' ? { ...c, realSolReserves: c.realSolReserves - 5_000_000_000n } : c; },
+    async largestHolders(m) { if (m === 'SLOW') throw Object.assign(new Error('rpc rate limited'), { rateLimited: true }); return w.rpc.largestHolders(m); } };
+  const ask = async () => ({ model_version: cfg.model_version_pin, answers: { launch_kind: { type: 'choice', probs: { organic: 1 }, pick: 'organic', p: 1 }, rug: { type: 'noul', p: 0.9 }, momentum: { type: 'noul', p: 0.1 }, quality: { type: 'score', expected: 0 } } });
+  const desk = createSolanaDesk({ cfg, judge: createLocalJudge({ ask, model: cfg.model_version_pin, batteries }), rpc, logger: createLogger({ dir: mkdtempSync(join(tmpdir(), 'sol-')) }), getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => 0.99 });
+  for (const m of ['TAX', 'OTHERQ', 'SLOW']) desk.onLaunch({ mint: m, id: m, bonding_curve: `curve-${m}`, received_at: t, _display: {} });
+  t += 60_000; await desk.scan();
+  assert.equal(desk.stats.rejections.risky_token_extension, 1);
+  assert.equal(desk.stats.rejections.non_sol_quote, 1);
+  assert.equal(desk.stats.rejections.rpc_rate_limited, 1);
+  assert.ok(desk.pending.has('SLOW'), 'a throttled launch is requeued, not lost');
+});
+
+test('feed fields from live PumpPortal: mayhem mode and serial launchers are cut for free', async () => {
+  // Field shapes copied from live subscribeNewToken events, Oct 2026.
+  const ev = parseCreateEvent({ txType: 'create', mint: 'M', traderPublicKey: 'C', bondingCurveKey: 'B', initialBuy: 2467071.716458, solAmount: 0.069135801, vTokensInBondingCurve: 1070532928.28, vSolInBondingCurve: 30.069, marketCapSol: 28.08, is_mayhem_mode: true, pool: 'pump' }, 0);
+  assert.equal(ev.mayhem, true);
+  assert.equal(ev.pool, 'pump');
+  let t = 0;
+  const w = fakeWorld();
+  const desk = createSolanaDesk({ cfg, judge: createLocalJudge({ ask: async () => ({}), model: cfg.model_version_pin, batteries }), rpc: w.rpc, logger: createLogger({ dir: mkdtempSync(join(tmpdir(), 'sol-')) }), getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => 0.99 });
+  desk.onLaunch({ mint: 'MAY', id: 'MAY', bonding_curve: 'curve-MAY', received_at: t, mayhem: true, pool: 'pump', _display: {} });
+  for (const m of ['S1', 'S2', 'S3']) desk.onLaunch({ mint: m, id: m, creator: 'SPAMMER', bonding_curve: `curve-${m}`, received_at: t, pool: 'pump', _display: {} });
+  desk.onLaunch({ mint: 'BONK', id: 'BONK', bonding_curve: 'x', received_at: t, pool: 'bonk', _display: {} });
+  t += 60_000; await desk.scan();
+  assert.equal(desk.stats.rejections.mayhem_mode, 1);
+  assert.equal(desk.stats.rejections.serial_launcher, 1, 'the third launch from the same wallet in 10 min is cut');
+  assert.equal(desk.stats.rejections.not_pump_pool, 1);
+});
+
+test('unknown holders: strict rejects, loose may trade at half ticket', async () => {
+  let t = 0;
+  const w = fakeWorld(); w.addLaunch({ mint: 'NOH' });
+  const rpc = { ...w.rpc, async largestHolders() { throw Object.assign(new Error('rpc rate limited'), { rateLimited: true }); } };
+  const ask = async () => ({ model_version: cfg.model_version_pin, answers: { launch_kind: { type: 'choice', probs: { organic: 1 }, pick: 'organic', p: 1 }, rug: { type: 'noul', p: 0.1 }, momentum: { type: 'noul', p: 0.9 }, quality: { type: 'score', expected: 2.5 } } });
+  const mk = (profile) => createSolanaDesk({ profile, cfg, judge: createLocalJudge({ ask, model: cfg.model_version_pin, batteries }), rpc, logger: createLogger({ dir: mkdtempSync(join(tmpdir(), 'sol-')) }), getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => 0.99 });
+  const strict = mk('strict'), loose = mk('loose');
+  for (const d of [strict, loose]) d.onLaunch({ mint: 'NOH', id: 'NOH', bonding_curve: 'curve-NOH', received_at: t, pool: 'pump', _display: {} });
+  t += 60_000; await strict.scan(); await loose.scan();
+  assert.equal(strict.stats.rejections.rpc_rate_limited, 1);
+  assert.equal(strict.book.open, null);
+  assert.ok(loose.book.open, 'loose trades without holder data');
+  const spent = loose.pessBroker.position('NOH').cost_sol * 150;
+  assert.ok(spent < cfg.solana.ticket_usd * 0.6, `half ticket expected, spent $${spent.toFixed(2)}`);
 });

@@ -10,6 +10,8 @@ export function launchPolicy(answers, state, S) {
   if (mom == null) why.push('momentum=unknown'); else if (mom < P.min_momentum_prob) why.push(`momentum=${mom.toFixed(2)}`);
   if (kind !== 'unknown' && !P.ok_kinds.includes(kind)) why.push(`kind=${kind}`);
   if (why.length) return { intent: 'skip', why };
-  const ticket = kind === 'unknown' ? S.ticket_usd * P.unknown_ticket_scale : S.ticket_usd;
-  return { intent: 'enter', side: 'buy', notional_usd: ticket, expected_edge_bps: mom * S.take_bps - (1 - mom) * S.stop_bps, why: [`kind=${kind}`] };
+  // Missing is not neutral: an unknown wallet mix or unknown holder distribution gets a smaller ticket, never a full one.
+  const unknowns = (kind === 'unknown' ? 1 : 0) + (state.top10_pct == null ? 1 : 0);
+  const ticket = S.ticket_usd * Math.pow(P.unknown_ticket_scale, unknowns);
+  return { intent: 'enter', side: 'buy', notional_usd: ticket, expected_edge_bps: mom * S.take_bps - (1 - mom) * S.stop_bps, why: [`kind=${kind}`, ...(state.top10_pct == null ? ['holders=unknown (half ticket)'] : [])] };
 }

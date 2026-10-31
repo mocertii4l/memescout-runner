@@ -33,7 +33,10 @@ In **memescout-desk → Environment**:
 |---|---|
 | `DASHBOARD_USER` | the username you want |
 | `DASHBOARD_PASSWORD_HASH` | everything after `DASHBOARD_PASSWORD_HASH=` from step 1 |
-| `SOLANA_RPC_URL` | optional but recommended: a free read-only RPC URL from Helius or similar. The public mainnet RPC is heavily rate-limited |
+| `SOLANA_RPC_URL` | **required for the strict desk to trade**: a free read-only RPC URL from Helius or similar. The public mainnet RPC refuses the holder lookup the strict filters need (verified live) |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | optional phone alerts (see desk/README.md → Alerts) |
+| `DISCORD_WEBHOOK_URL` | optional alerts to a Discord channel instead |
+| `DESK_LOOSE` | `1` to also run the loose desk (kept out of account equity) |
 
 The rest is already set by `render.yaml`: HTTPS-only cookies, proxy awareness, logs on the disk, paper mode.
 

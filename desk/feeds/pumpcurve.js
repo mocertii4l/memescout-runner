@@ -67,3 +67,14 @@ export function applyBuy(c, solIn) {
   const newVt = (vs * vt) / newVs;
   return { ...c, virtualSolReserves: newVs, virtualTokenReserves: newVt, realSolReserves: c.realSolReserves != null ? c.realSolReserves + add : null, realTokenReserves: c.realTokenReserves != null ? c.realTokenReserves - (vt - newVt) : null };
 }
+
+/**
+ * pump.fun now also launches curves priced in other tokens (seen on mainnet, Oct 2026).
+ * A SOL-priced curve always has virtual SOL = real SOL + 30 SOL. Anything else is not
+ * priced in SOL, and every SOL-based number this desk computes would be wrong for it.
+ */
+export function isSolQuotedCurve(c) {
+  if (!c || c.realSolReserves == null) return false;
+  const diff = c.virtualSolReserves - c.realSolReserves - VIRTUAL_SOL_OFFSET_LAMPORTS;
+  return (diff < 0n ? -diff : diff) <= 1_000_000n; // within 0.001 SOL
+}

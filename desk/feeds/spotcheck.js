@@ -55,7 +55,8 @@ export async function fetchRealTrades(rpc, { curveKey, mint, ts, windowMs = 1500
   const picked = sigs.filter((_, i) => i % step === 0).slice(0, maxTx);
   const out = [];
   for (const sig of picked) {
-    const tx = await rpc.call('getTransaction', [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]).catch(() => null);
+    // Solana now has v1 transactions; asking for v0 only makes the RPC refuse them (verified on mainnet, Oct 2026).
+    const tx = await rpc.call('getTransaction', [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' }]).catch(() => null);
     const t = parseCurveTrade(tx, curveKey, mint);
     if (t) out.push(t);
   }

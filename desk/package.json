@@ -18,6 +18,10 @@
     "solana:shadow": "node solana-runner.js --mode=shadow",
     "dashboard": "node dashboard/server.js",
     "dashboard:password": "node dashboard/auth.js",
-    "solana:both": "node solana-runner.js --mode=paper --loose"
+    "solana:both": "node solana-runner.js --mode=paper --loose",
+    "start": "node start.mjs",
+    "start:both": "node start.mjs --loose",
+    "check": "node tools/check.mjs",
+    "backup": "node tools/backup.mjs"
   }
 }

@@ -6,22 +6,27 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, accessSync, constants } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const wanted = process.env.DESK_LOG_DIR || '/var/data/logs';
+// Local default: desk/logs/data. Render sets DESK_LOG_DIR=/var/data/logs (its persistent disk).
+const wanted = process.env.DESK_LOG_DIR || fileURLToPath(new URL('./logs/data/', import.meta.url));
 let logDir = wanted;
 try { mkdirSync(wanted, { recursive: true }); accessSync(wanted, constants.W_OK); }
 catch {
   logDir = '/tmp/desk-logs'; mkdirSync(logDir, { recursive: true });
-  console.error(`WARNING: ${wanted} is not writable; using ${logDir}. History will be LOST on every restart or deploy. Attach a Render disk at /var/data.`);
+  console.error(`WARNING: ${wanted} is not writable; using ${logDir}. History will be LOST on every restart. (On Render: attach the disk at /var/data.)`);
 }
-const env = { ...process.env, DESK_LOG_DIR: logDir, DESK_MODE: process.env.DESK_MODE === 'shadow' ? 'shadow' : 'paper' };
-if (!env.DASHBOARD_USER || !env.DASHBOARD_PASSWORD_HASH) {
+const args = process.argv.slice(2);
+const env = { ...process.env, DESK_LOG_DIR: logDir, DESK_MODE: process.env.DESK_MODE === 'shadow' || args.includes('--shadow') ? 'shadow' : 'paper' };
+if (args.includes('--loose')) env.DESK_LOOSE = '1';
+if (args.includes('--synthetic')) env.DESK_RUN_SYNTHETIC = '1';
+const publicHost = env.DASHBOARD_HOST && !['127.0.0.1', 'localhost', '::1'].includes(env.DASHBOARD_HOST);
+if (publicHost && (!env.DASHBOARD_USER || !env.DASHBOARD_PASSWORD_HASH)) {
   console.error('DASHBOARD_USER and DASHBOARD_PASSWORD_HASH must be set in Render → Environment. Generate the hash locally with: cd desk && npm run dashboard:password');
 }
 
 const jobs = [
   { name: 'dashboard', file: 'dashboard/server.js', critical: true },
   { name: 'solana', file: 'solana-runner.js' },
-  ...(process.env.DESK_RUN_SYNTHETIC === '1' ? [{ name: 'synthetic', file: 'runner.js' }] : []),
+  ...(env.DESK_RUN_SYNTHETIC === '1' ? [{ name: 'synthetic', file: 'runner.js' }] : []),
 ];
 let stopping = false;
 const children = new Map();
@@ -52,5 +57,6 @@ function stop(code = 0) {
 }
 process.on('SIGTERM', () => stop(0));
 process.on('SIGINT', () => stop(0));
-console.log(`desk supervisor: ${jobs.map((j) => j.name).join(' + ')} · logs ${logDir} · mode ${env.DESK_MODE}`);
+console.log(`desk supervisor: ${jobs.map((j) => j.name).join(' + ')}${env.DESK_LOOSE === '1' ? ' (strict + loose)' : ''} · logs ${logDir} · mode ${env.DESK_MODE}`);
+if (!publicHost) console.log(`dashboard: open http://127.0.0.1:${env.PORT || env.DASHBOARD_PORT || 8080} in your browser (Ctrl+C here stops everything)`);
 for (const j of jobs) run(j);

@@ -13,18 +13,22 @@ feed → state/ (code: mid, spread, imbalance, vol, returns, inventory, drawdown
      → logs/  (state, questions, answers, outcomes → reports/)
 ```
 
-## Quick start (no keys, no network)
+## Quick start
 
 ```bash
 cd desk
-npm test                                   # 30 tests
-DESK_TICKS=500 npm run shadow              # Jev labels everything, nothing executes
-DESK_TICKS=500 npm run paper               # policy executes against the paper broker
-npm run report:daily                       # decisions, trades, PnL after fees, vetoes, fallbacks
-npm run report:calibration                 # Brier, ECE, Platt fit, reliability SVGs → logs/data/reports/
+npm run check          # self-test: Node, log folder, SOL price, Solana RPC, curve decoding, live launch feed
+npm start              # strict Solana desk + dashboard at http://127.0.0.1:8080   (Ctrl+C stops both)
+npm run start:both     # strict + loose
+npm run backup         # copy logs/data → backups/<timestamp>/
+npm test               # unit + end-to-end tests
 ```
 
-Without `JUDGE_URL`, the runner uses an in-process **mock** judge. It's a set of deterministic heuristics, not a model, so the whole loop and the reports can run. Calibration numbers from the mock mean nothing.
+On Windows PowerShell use `npm.cmd` (e.g. `npm.cmd start`).
+
+**Set `SOLANA_RPC_URL` to a free Helius (or similar) read-only URL.** The public mainnet RPC refuses `getTokenLargestAccounts` (verified live, Oct 2026), so without your own URL the strict desk can never pass its holder checks and will not trade. The loose desk can still trade without holder data, at half ticket size.
+
+The older synthetic demo (generated prices: Gambler/House/Spy) is still available with `npm run paper` / `npm run shadow`.
 
 ### Running the judge as its own service
 
@@ -85,6 +89,37 @@ What it does, in order:
 9. **Outcomes:** for every judged launch, `momentum` is checked against the price 2 min later and `rug` against a 50% drop within 10 min. These feed `report:calibration`.
 
 One position at a time: the scan is off while a position is open. Every number is under `solana` in `config/desk.json`.
+
+### What was verified on mainnet (Oct 2026), and what the desk does about it
+
+- **Curve layout:** virtual/real reserves, total supply and the graduated flag decode correctly from live accounts.
+- **Holder math:** the curve's own token account is found within 0.25% of the expected balance.
+- **Other-currency curves:** pump.fun now also prices some curves in other tokens. A SOL curve always has virtual SOL = real SOL + 30, and anything else is rejected as `non_sol_quote`, because SOL-based prices would be wrong for it.
+- **Token-2022 add-ons:** new tokens use Token-2022. pump.fun's own tokens carry only metadata add-ons. Tokens with transfer fees/hooks, a permanent delegate, frozen-by-default accounts and similar are rejected as `risky_token_extension`.
+- **Version 1 transactions:** Solana now has these, and the spot-check requests them; asking for v0 only gets refused.
+- **Launch feed:** fields match the parser. The new `is_mayhem_mode` flag (pump.fun's own bot trades the token early) is rejected as `mayhem_mode` by default.
+- **Serial launchers:** the same wallet launching several zero-buy tokens in seconds is common. More than 2 launches per wallet in 10 minutes → `serial_launcher`.
+- **Rate limits:** throttled lookups are labelled `rpc_rate_limited` / `holders_unavailable` and the launch is requeued, never judged on missing data.
+
+### Exits
+
+- **Stop:** −15% → close.
+- **Partial take:** +30% → sell half (`partial_fraction`), let the rest run.
+- **Trailing stop:** once the trade has been +15% (`trail_activate_bps`), close the rest if it falls 10% (`trail_bps`) from its best.
+- **Other exits:** a 10-minute time stop, graduation, and no data after retries each close the whole position.
+
+### Alerts (optional)
+
+**Telegram:** message @BotFather → `/newbot` → copy the token. Send your new bot any message, then open `https://api.telegram.org/bot<token>/getUpdates` and copy `chat.id`. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
+**Discord:** channel → Edit → Integrations → Webhooks → copy URL into `DISCORD_WEBHOOK_URL`.
+
+You get:
+- a message on every paper buy and sell, with P/L
+- an alert when the desk halts
+- an alert when the launch feed is down for 2+ minutes, and when it's back
+- a daily summary
+
+Messages are plain text, and Discord mentions are disabled (token names are attacker-controlled).
 
 ### Two ledgers: optimistic vs pessimistic
 

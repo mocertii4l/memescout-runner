@@ -86,10 +86,17 @@
     "curve_complete": -1,
     "whale": 1800000,
     "no_inflow": 600000,
-    "enrich_failed": 120000,
+    "enrich_failed": 0,
     "over_jev_cap": 60000,
     "judge_unavailable": 60000,
-    "low_market_cap": 600000
+    "low_market_cap": 600000,
+    "risky_token_extension": -1,
+    "non_sol_quote": -1,
+    "rpc_rate_limited": 0,
+    "holders_unavailable": 0,
+    "not_pump_pool": -1,
+    "mayhem_mode": -1,
+    "serial_launcher": -1
   },
   "solana": {
     "_comment": "Spy launch scanner on real pump.fun launches. Paper only. Amounts in USD are converted at the live SOL price (Jupiter), falling back to sol_usd_fallback.",
@@ -145,8 +152,16 @@
     "spotcheck": {
       "delay_ms": 60000,
       "window_ms": 15000,
-      "max_tx": 25
-    }
+      "max_tx": 12
+    },
+    "partial_fraction": 0.5,
+    "trail_activate_bps": 1500,
+    "trail_bps": 1000,
+    "_exits_comment": "stop at -stop_bps; at +take_bps sell partial_fraction (0 or 1 = sell all); after the peak reaches +trail_activate_bps, close the rest if price falls trail_bps from the peak; max_hold_ms time stop.",
+    "allow_mayhem": false,
+    "serial_window_ms": 600000,
+    "max_launches_per_creator": 2,
+    "allow_unknown_holders": false
   },
   "account": {
     "_comment": "Paper account shown on the dashboard. Daily loss and position caps are ENFORCED by each runner's risk engine; the two alert levels below are display-only warnings.",
@@ -174,7 +189,8 @@
           "organic",
           "bundled"
         ]
-      }
+      },
+      "allow_unknown_holders": true
     }
   }
 }

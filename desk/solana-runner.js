@@ -21,9 +21,11 @@ import { createJudgeClient, createLocalJudge } from './judge/client.js';
 import { createMockJev } from './judge/jev-client.js';
 import { connectPumpPortal } from './feeds/pumpportal.js';
 import { createRpc, solUsd } from './feeds/solana-rpc.js';
-import { spotPriceSol, curveProgress } from './feeds/pumpcurve.js';
+import { spotPriceSol, curveProgress, isSolQuotedCurve } from './feeds/pumpcurve.js';
+import { RISKY_TOKEN_EXTENSIONS } from './feeds/solana-rpc.js';
 import { rowsFor } from './outcomes/resolvers.js';
 import { fetchRealTrades, compareFill } from './feeds/spotcheck.js';
+import { createNotifier, fmt as alertFmt } from './alerts/notify.js';
 import { isMain, flag } from './config/main.js';
 
 const TOTAL_SUPPLY = 1_000_000_000;
@@ -40,9 +42,11 @@ export function createCachedRpc(rpc, { ttlMs = 2500, now = () => Date.now() } = 
   const cache = new Map();
   const wrap = (name) => async (key) => {
     const k = name + ':' + key, hit = cache.get(k);
-    if (hit && now() - hit.at < ttlMs) return hit.value;
-    const value = await rpc[name](key);
-    cache.set(k, { at: now(), value });
+    if (hit && now() - hit.at < ttlMs) { if (hit.error) throw hit.error; return hit.value; }
+    let value, error;
+    try { value = await rpc[name](key); } catch (e) { error = e; }
+    cache.set(k, { at: now(), value, error }); // errors too: a rate limit shouldn't be hit twice by two profiles
+    if (error) throw error;
     if (cache.size > 2000) cache.delete(cache.keys().next().value);
     return value;
   };
@@ -76,7 +80,7 @@ export function buildLaunchState(c, now = Date.now()) {
   };
 }
 
-export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: baseCfg = loadConfig(), judge, rpc = createRpc(), logger = createLogger(), getSolUsd = () => solUsd({ fallback: baseCfg.solana.sol_usd_fallback }), now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), rand } = {}) {
+export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: baseCfg = loadConfig(), judge, rpc = createRpc(), logger = createLogger(), getSolUsd = () => solUsd({ fallback: baseCfg.solana.sol_usd_fallback }), now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), rand, notify = { send: async () => false } } = {}) {
   // Profiles are fully independent desks: own filters, book, bench, risk engine, ledgers and logs tag.
   // 'loose' only overrides thresholds; the scam checks (mint/freeze authority, graduated curve) are never relaxed.
   const cfg = profile === 'strict' ? baseCfg : { ...baseCfg, solana: mergeDeep(baseCfg.solana, baseCfg.solana_profiles?.[profile] ?? (() => { throw new Error(`unknown profile ${profile}`); })()) };
@@ -85,7 +89,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
   const STATUS = profile === 'strict' ? 'solana' : `solana-${profile}`;
   const riskCfg = { ...cfg, risk: { ...cfg.risk, ...S.risk_overrides } };
   const log = logger;
-  const risk = createRiskEngine(riskCfg, { onVeto: (v) => log.veto({ bot: BOT, ...v }) });
+  const risk = createRiskEngine(riskCfg, { onVeto: (v) => { log.veto({ bot: BOT, ...v }); if (v.halt) notify.send(alertFmt.halt({ profile, why: `daily loss limit hit (${v.realizedToday?.toFixed?.(2)} USD)` }), { key: `halt-${profile}`, dedupeMs: 3600_000 }).catch(() => {}); } });
   // Two ledgers on every trade: optimistic is the ceiling, pessimistic is closer to a floor.
   // Risk limits and the headline PnL use the pessimistic one.
   const PS = S.pessimistic;
@@ -110,30 +114,43 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     if (recent.size > 60) recent.delete(recent.keys().next().value);
   }
 
+  const creatorLaunches = new Map(); // creator -> recent launch timestamps
   function onLaunch(l) {
     stats.launches_seen++;
+    if (l.creator) { const xs = (creatorLaunches.get(l.creator) ?? []).filter((x) => l.received_at - x < S.serial_window_ms); xs.push(l.received_at); creatorLaunches.set(l.creator, xs); l.creator_recent_launches = xs.length; if (creatorLaunches.size > 5000) creatorLaunches.delete(creatorLaunches.keys().next().value); }
     track(l.mint, { mint: l.mint, symbol: l._display?.symbol ?? '', name: l._display?.name ?? '', received_at: l.received_at, stage: 'waiting', detail: `checks after ${S.min_age_s}s` });
     if (pending.size >= S.max_pending) { pending.delete(pending.keys().next().value); stats.dropped++; }
     pending.set(l.mint, { ...l, lead_id: `${profile === 'strict' ? 'S' : 'SL'}-${l.mint.slice(0, 8)}-${l.received_at.toString(36)}` });
   }
 
+  const TRANSIENT = new Set(['rpc_rate_limited', 'holders_unavailable', 'enrich_failed']);
+  const scanning = new Map();
   const funnel = createFunnel({
     cfg: { ...cfg, funnel: { ...cfg.funnel, max_jev_candidates: S.max_jev_candidates } },
     bench,
-    logRejection: (r) => { stats.rejections[r.check] = (stats.rejections[r.check] ?? 0) + 1; track(r.id, { stage: r.stage === 'jev' ? 'judged' : 'rejected', detail: r.check }); log.rejection({ bot: BOT, market: r.id, ...r }); },
+    logRejection: (r) => {
+      // Transient data problems are not a verdict on the token: requeue it while it is still young enough.
+      if (TRANSIENT.has(r.check) && scanning.has(r.id)) { const l = scanning.get(r.id); if ((now() - l.received_at) / 1000 < S.max_age_s - 20) { pending.set(r.id, l); stats.requeued = (stats.requeued ?? 0) + 1; } } stats.rejections[r.check] = (stats.rejections[r.check] ?? 0) + 1; track(r.id, { stage: r.stage === 'jev' ? 'judged' : 'rejected', detail: r.check }); log.rejection({ bot: BOT, market: r.id, ...r }); },
     freeCut: (c) => {
       const age = (now() - c.received_at) / 1000;
       if (age > S.max_age_s) return 'stale_signal';
       if (age < S.min_age_s) return 'too_young';
+      if (c.pool && c.pool !== 'pump') return 'not_pump_pool';
       if (!c.bonding_curve) return 'curve_missing';
+      if (c.mayhem && !S.allow_mayhem) return 'mayhem_mode';
+      if ((c.creator_recent_launches ?? 1) > S.max_launches_per_creator) return 'serial_launcher';
       if ((c.creator_initial_buy_pct ?? 0) > S.max_creator_initial_buy_pct) return 'creator_heavy_buy';
       return null;
     },
     enrich: async (c) => {
-      const [mint, curve, holders] = await Promise.all([rpc.mintInfo(c.mint), rpc.curve(c.bonding_curve), rpc.largestHolders(c.mint)]);
+      const [mint, curve] = await Promise.all([rpc.mintInfo(c.mint), rpc.curve(c.bonding_curve)]);
+      // Holder lookup is the heaviest call and the first the public RPC throttles. Its failure is its own reason,
+      // so a rate limit never looks like a bad token (and never passes as a good one).
+      let holders = null, holdersError = null;
+      if (mint && curve && isSolQuotedCurve(curve)) { try { holders = await rpc.largestHolders(c.mint); } catch (e) { holdersError = e.rateLimited ? 'rate_limited' : 'error'; } }
       const price = curve ? spotPriceSol(curve) : null;
       return {
-        mint_info: mint, curve, holders: holderStats(holders, curve),
+        mint_info: mint, curve, holders: holders ? holderStats(holders, curve) : null, holders_error: holdersError,
         price_sol: price,
         market_cap_usd: price != null ? Number((price * TOTAL_SUPPLY * sol.price).toFixed(0)) : null,
         sol_inflow: curve ? Number((Number(curve.realSolReserves) / 1e9 - (c.creator_initial_buy_sol ?? 0)).toFixed(3)) : null,
@@ -143,8 +160,12 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
       if (!c.mint_info) return 'enrich_failed';
       if (c.mint_info.mint_authority) return 'mint_authority_open';
       if (c.mint_info.freeze_authority) return 'freeze_authority_open';
+      if (c.mint_info.extensions?.some((x) => RISKY_TOKEN_EXTENSIONS.includes(x))) return 'risky_token_extension';
       if (!c.curve) return 'curve_missing';
       if (c.curve.complete) return 'curve_complete';
+      if (!isSolQuotedCurve(c.curve)) return 'non_sol_quote';
+      if (!c.holders && !S.allow_unknown_holders) return c.holders_error === 'rate_limited' ? 'rpc_rate_limited' : 'holders_unavailable';
+      if (!c.holders) return null; // unknown holders: allowed by this profile, judged with blank fields, half ticket (policy)
       if ((c.market_cap_usd ?? 0) < S.min_market_cap_usd) return 'low_market_cap';
       if ((c.sol_inflow ?? 0) < S.min_inflow_sol) return 'no_inflow';
       if (c.holders.top10_pct == null || c.holders.top10_pct > S.max_top10_pct) return 'concentration';
@@ -177,6 +198,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     // Newest-first among those old enough: a launch close to max age is about to expire anyway.
     const batch = [...pending.values()].filter((l) => (t - l.received_at) / 1000 >= S.min_age_s).sort((a, b) => b.received_at - a.received_at).slice(0, S.max_enrich_per_cycle);
     for (const l of batch) pending.delete(l.mint);
+    scanning.clear(); for (const l of batch) scanning.set(l.mint, l);
     if (!batch.length) return;
     const cands = batch.map((l) => ({ ...l, creator_initial_buy_pct: l.creator_initial_buy_tokens != null ? (l.creator_initial_buy_tokens / TOTAL_SUPPLY) * 100 : null }));
     stats.scanned += cands.length;
@@ -196,42 +218,60 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     if (res.status !== 'filled') { log.event({ bot: BOT, type: 'entry_rejected', lead_id: pick.lead_id, reason: res.reason }); return; }
     stats.entries++;
     track(pick.mint, { stage: 'bought', detail: `paper buy $${order.notional_usd}` });
+    notify.send(alertFmt.entry({ profile, symbol: pick._display?.symbol, mint: pick.mint, usdIn: order.notional_usd })).catch(() => {});
     book.claim({ lead_id: pick.lead_id, bot: BOT, market: pick.mint, curveKey: pick.bonding_curve, entry_price_sol: res.fill_price_sol, opened_ms: now(), display: pick._display, pessExitFailures: 0 });
     // Pessimistic ledger: the same decision, filled after a delay on a re-read curve.
     await sleep(PS.entry_delay_ms);
     const later = await rpc.curve(pick.bonding_curve).catch(() => null);
     pessBroker.onBook(pick.mint, later ?? fresh ?? pick.curve);
     const pres = await pessBroker.place(req);
-    if (pres.status === 'failed') { stats.pess_entry_failed++; risk.recordPnl(pres.realized_usd); stats.realized_usd += pres.realized_usd; }
+    if (pres.status === 'failed') { stats.pess_entry_failed++; risk.recordPnl(pres.realized_usd); stats.realized_usd += pres.realized_usd; if (book.open) book.open.pessRealized = pres.realized_usd; }
     else if (pres.status === 'filled') { const sq = spotQueue.find((q) => q.lead_id === req.client_id && q.side === 'buy'); if (sq) sq.pessimistic_price_sol = pres.fill_price_sol; }
   }
 
+  /**
+   * EXIT seat: arithmetic only. It never re-reads the answers that opened the trade.
+   *   stop        −stop_bps from entry → close everything
+   *   partial     +take_bps once → sell partial_fraction, let the rest run
+   *   trailing    after the peak reached +trail_activate_bps, a fall of trail_bps from the peak → close the rest
+   *   time_stop, graduated, no_data_after_retries → close everything
+   * Each ledger (optimistic, pessimistic) executes the same decisions; the pessimistic one can fail and retry.
+   */
   async function manageExit() {
     const p = book.open;
     if (!p) return;
-    // EXIT seat: arithmetic only. It never re-reads the answers that opened the trade.
     let curve = null;
     try { curve = await rpc.curve(p.curveKey); exitFailures = 0; } catch { exitFailures++; }
     const R = riskCfg.risk;
-    let reason = null;
-    if (!curve) { if (exitFailures > R.exit_data_retries) reason = 'no_data_after_retries'; else return; }
-    else {
-      broker.onBook(p.market, curve);
-      p.mark_price_sol = spotPriceSol(curve);
-      const move = (Math.log(spotPriceSol(curve) / p.entry_price_sol)) * 1e4;
-      reason = curve.complete ? 'graduated' : move >= S.take_bps ? 'take' : move <= -S.stop_bps ? 'stop' : now() - p.opened_ms >= S.max_hold_ms ? 'time_stop' : null;
+    let action = p.pendingAction ?? null; // a pessimistic sell that failed is retried with the same intent
+    if (!action) {
+      if (!curve) { if (exitFailures > R.exit_data_retries) action = { kind: 'full', reason: 'no_data_after_retries' }; else return; }
+      else {
+        broker.onBook(p.market, curve);
+        const price = spotPriceSol(curve);
+        p.mark_price_sol = price;
+        const move = Math.log(price / p.entry_price_sol) * 1e4;
+        p.peak_bps = Math.max(p.peak_bps ?? 0, move);
+        const trailing = p.peak_bps >= S.trail_activate_bps && p.peak_bps - move >= S.trail_bps;
+        if (curve.complete) action = { kind: 'full', reason: 'graduated' };
+        else if (move <= -S.stop_bps) action = { kind: 'full', reason: 'stop' };
+        else if (!p.partialDone && move >= S.take_bps && S.partial_fraction > 0 && S.partial_fraction < 1) action = { kind: 'partial', reason: 'partial_take', fraction: S.partial_fraction };
+        else if (!p.partialDone && move >= S.take_bps) action = { kind: 'full', reason: 'take' };
+        else if (trailing) action = { kind: 'full', reason: 'trailing_stop' };
+        else if (now() - p.opened_ms >= S.max_hold_ms) action = { kind: 'full', reason: 'time_stop' };
+      }
     }
-    if (!reason && !p.optimisticClosed) return;
-    // A position you can't measure is a position you don't hold: close at the last known curve.
-    // Graduated curves can't be sold on the curve in reality (liquidity moves to PumpSwap); paper closes at the final curve price and flags it.
-    const sellReq = { market: p.market, side: 'sell', sol_usd: sol.price, client_id: `exit-${p.lead_id}`, curve: p.curveKey };
-    if (!p.optimisticClosed) {
+    if (!action) return;
+    const fraction = action.kind === 'partial' ? action.fraction : 1;
+    const sellReq = { market: p.market, side: 'sell', fraction, sol_usd: sol.price, client_id: `${action.kind === 'partial' ? 'partial' : 'exit'}-${p.lead_id}`, curve: p.curveKey };
+
+    // Optimistic ledger: instant.
+    if (p.optDoneFor !== action.reason && broker.position(p.market).tokens > 0) {
       const res = await broker.place(sellReq);
-      if (res.status === 'filled') stats.realized_usd_optimistic += res.realized_usd;
-      p.optimisticClosed = true; p.exitReason = reason;
-      log.event({ bot: BOT, type: 'exit', ledger: 'optimistic', lead_id: p.lead_id, market: p.market, reason, realized_usd: res.realized_usd ?? null });
+      if (res.status === 'filled') { stats.realized_usd_optimistic += res.realized_usd; p.optRealized = (p.optRealized ?? 0) + res.realized_usd; }
+      p.optDoneFor = action.reason;
     }
-    // Pessimistic ledger exits after a delay, may fail and retry on the next poll, and is written off after N failures.
+    // Pessimistic ledger: delayed, re-read, can fail; the book stays open until it is done.
     if (pessBroker.position(p.market).tokens > 0) {
       await sleep(PS.exit_delay_ms);
       const later = await rpc.curve(p.curveKey).catch(() => null);
@@ -239,18 +279,31 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
       const pres = await pessBroker.place(sellReq);
       if (pres.status === 'failed') {
         stats.pess_exit_failed++;
-        if (++p.pessExitFailures < PS.exit_max_failures) return; // book stays open until the pessimistic ledger is out
+        p.pessRealized = (p.pessRealized ?? 0) + pres.realized_usd; // the fee of the failed attempt
+        if (++p.pessExitFailures < PS.exit_max_failures) { p.pendingAction = action; return; }
         const w = pessBroker.writeOff(p.market, sol.price);
         stats.written_off++; risk.recordPnl(w.realized_usd); stats.realized_usd += w.realized_usd;
-        log.event({ bot: BOT, type: 'exit', ledger: 'pessimistic', lead_id: p.lead_id, market: p.market, reason: 'written_off', realized_usd: w.realized_usd });
+        p.pessRealized += w.realized_usd;
+        action = { kind: 'full', reason: 'written_off' };
       } else if (pres.status === 'filled') {
         risk.recordPnl(pres.realized_usd); stats.realized_usd += pres.realized_usd;
+        p.pessRealized = (p.pessRealized ?? 0) + pres.realized_usd;
         const sq = spotQueue.find((q) => q.lead_id === sellReq.client_id); if (sq) sq.pessimistic_price_sol = pres.fill_price_sol;
-        log.event({ bot: BOT, type: 'exit', ledger: 'pessimistic', lead_id: p.lead_id, market: p.market, reason: p.exitReason, realized_usd: pres.realized_usd });
       }
     }
+    p.pendingAction = null; p.pessExitFailures = 0;
+    if (action.kind === 'partial') {
+      p.partialDone = true;
+      log.event({ bot: BOT, type: 'partial_exit', lead_id: p.lead_id, market: p.market, reason: action.reason, fraction });
+      track(p.market, { stage: 'bought', detail: `took ${Math.round(fraction * 100)}% profit, rest running` });
+      return;
+    }
+    // One exit event per ledger with the whole trade's realized P/L (partials included), for win rate and history.
+    log.event({ bot: BOT, type: 'exit', ledger: 'optimistic', lead_id: p.lead_id, market: p.market, reason: action.reason, realized_usd: p.optRealized ?? null });
+    log.event({ bot: BOT, type: 'exit', ledger: 'pessimistic', lead_id: p.lead_id, market: p.market, reason: action.reason, realized_usd: p.pessRealized ?? 0 });
     stats.exits++;
-    track(p.market, { stage: 'sold', detail: `${p.exitReason ?? reason ?? 'exit'}` });
+    track(p.market, { stage: 'sold', detail: action.reason.replaceAll('_', ' ') });
+    notify.send(alertFmt.exit({ profile, symbol: p.display?.symbol, mint: p.market, reason: action.reason, pess: p.pessRealized ?? 0, opt: p.optRealized ?? 0 })).catch(() => {});
     book.release(p.lead_id, 'EXIT');
   }
 
@@ -321,16 +374,31 @@ if (isMain(import.meta.url)) {
   if (!process.env.JUDGE_URL) console.log('JUDGE_URL not set → in-process MOCK judge (heuristics, not Jev).');
   const loose = ['1', 'true', 'yes'].includes(String(flag('loose', 'DESK_LOOSE', '0')).toLowerCase()) || process.argv.includes('--loose');
   const rpc = createCachedRpc(createRpc());
-  const desks = [createSolanaDesk({ profile: 'strict', mode, cfg, judge, rpc })];
-  if (loose) desks.push(createSolanaDesk({ profile: 'loose', mode, cfg, judge, rpc }));
+  const notify = createNotifier({ log: (m) => console.log(m) });
+  console.log(notify.enabled ? `alerts on: ${notify.channels.join(' + ')}` : 'alerts off (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID or DISCORD_WEBHOOK_URL to get phone alerts)');
+  const desks = [createSolanaDesk({ profile: 'strict', mode, cfg, judge, rpc, notify })];
+  if (loose) desks.push(createSolanaDesk({ profile: 'loose', mode, cfg, judge, rpc, notify }));
   const feed = connectPumpPortal({ onLaunch: (l) => { for (const d of desks) d.onLaunch(l); }, onStatus: (s) => console.log(new Date().toISOString(), s.type, s.retry_ms ?? '') });
   console.log(`solana launch desk mode=${mode} profiles=${desks.map((d) => d.profile).join('+')} rpc=${process.env.SOLANA_RPC_URL ? 'custom' : 'public mainnet'} — paper only, never signs`);
   let stopping = false;
   const stop = () => { stopping = true; feed.stop(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   const loop = async (fn, ms, name) => { while (!stopping) { const t = Date.now(); try { await fn(); } catch (e) { console.log(`${name} error: ${e.message}`); } const end = Date.now() + Math.max(250, ms - (Date.now() - t)); while (!stopping && Date.now() < end) await new Promise((r) => setTimeout(r, Math.min(500, end - Date.now()))); } };
-  let beats = 0;
+  let beats = 0, feedDownSince = null, feedAlerted = false, lastDay = new Date().toISOString().slice(0, 10);
+  const watch = async () => {
+    // Feed health → alert once when down 2+ min, once when back.
+    const down = !feed.connected || !feed.lastMessageAt || Date.now() - feed.lastMessageAt > 120_000;
+    if (down) { feedDownSince ??= Date.now(); if (!feedAlerted && Date.now() - feedDownSince > 120_000) { feedAlerted = true; notify.send(alertFmt.feed(false)).catch(() => {}); } }
+    else { if (feedAlerted) notify.send(alertFmt.feed(true)).catch(() => {}); feedDownSince = null; feedAlerted = false; }
+    // Daily summary at the UTC day change.
+    const day = new Date().toISOString().slice(0, 10);
+    if (day !== lastDay) {
+      lastDay = day;
+      notify.send(alertFmt.daily(desks.map((d) => `${d.profile}: ${d.stats.entries} buys · ${d.stats.exits} sells · ${d.stats.realized_usd >= 0 ? '+' : '-'}$${Math.abs(d.stats.realized_usd).toFixed(2)} pessimistic since start`))).catch(() => {});
+    }
+  };
   const heartbeat = async () => {
+    await watch();
     for (const d of desks) d.writeStatus({ feed_connected: feed.connected, feed_last_message_at: feed.lastMessageAt });
     if ((beats = (beats + 1) % 6) !== 1) return; // status every 10 s, console line every minute
     for (const d of desks) {

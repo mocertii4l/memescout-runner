@@ -17,6 +17,7 @@ export function parseCreateEvent(m, receivedAt = Date.now()) {
     v_sol: num(m.vSolInBondingCurve),
     v_tokens: num(m.vTokensInBondingCurve),
     market_cap_sol: num(m.marketCapSol),
+    mayhem: m.is_mayhem_mode === true, // pump.fun's own bot trades these at first: artificial flow
     received_at: receivedAt,
     _display: { symbol: String(m.symbol ?? '').slice(0, 16), name: String(m.name ?? '').slice(0, 40) }, // logs only
   };
