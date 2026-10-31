@@ -1,0 +1,16 @@
+{
+  "name": "memescout-desk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Paper-only AI trading desk skeleton: code calculates, Jev judges, risk engine vetoes, paper broker executes.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "judge": "node judge/server.js",
+    "shadow": "DESK_MODE=shadow node runner.js",
+    "paper": "DESK_MODE=paper node runner.js",
+    "report:calibration": "node reports/calibration.js",
+    "report:daily": "node reports/daily.js",
+    "test": "node --test test/*.test.js"
+  }
+}
