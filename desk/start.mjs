@@ -39,10 +39,12 @@ function run(job, attempt = 0) {
   child.on('exit', (code, signal) => {
     children.delete(job.name);
     if (stopping) return;
+    // Port taken = another desk is already running: don't retry, and don't run a second scanner beside it.
+    if (job.critical && code === 3) { console.error('Stopping this copy so two desks never run at once.'); return stop(1); }
     const healthy = Date.now() - started > 60_000;
     const next = healthy ? 0 : attempt + 1;
     // A dashboard that can't start (e.g. missing login config) should fail the deploy, not loop forever.
-    if (job.critical && next >= 5) { console.error(`${job.name} keeps failing; exiting so Render shows the deploy as failed.`); return stop(1); }
+    if (job.critical && next >= 5) { console.error(`${job.name} keeps failing; stopping everything (on Render this marks the deploy as failed).`); return stop(1); }
     const wait = Math.min(60_000, 1000 * 2 ** next);
     console.error(`${job.name} exited (${signal ?? code}); restarting in ${wait / 1000}s`);
     setTimeout(() => run(job, next), wait);

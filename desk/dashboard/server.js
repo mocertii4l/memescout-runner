@@ -73,5 +73,12 @@ if (isMain(import.meta.url)) {
   if (!local && !(process.env.DASHBOARD_USER && process.env.DASHBOARD_PASSWORD_HASH)) {
     throw new Error('Binding beyond localhost requires DASHBOARD_USER and DASHBOARD_PASSWORD_HASH (run: npm run dashboard:password).');
   }
+  server.on('error', (e) => {
+    if (e.code === 'EADDRINUSE') {
+      console.error(`\nPort ${port} is already in use: another copy of the desk (or its dashboard) is probably still running.\nClose the other PowerShell window, or stop leftover copies with:  Get-Process node | Stop-Process\nThen start the desk again.\n`);
+      process.exit(3);
+    }
+    throw e;
+  });
   server.listen(port, host, () => console.log(`dashboard on http://${host}:${port} · login ${process.env.DASHBOARD_USER ? 'required' : 'off (localhost only)'}`));
 }
