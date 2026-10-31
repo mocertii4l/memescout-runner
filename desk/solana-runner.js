@@ -139,7 +139,10 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     bench,
     logRejection: (r) => {
       // Transient data problems are not a verdict on the token: requeue it while it is still young enough.
-      if (TRANSIENT.has(r.check) && scanning.has(r.id)) { const l = scanning.get(r.id); if ((now() - l.received_at) / 1000 < S.max_age_s - 20) { pending.set(r.id, l); stats.requeued = (stats.requeued ?? 0) + 1; } } stats.rejections[r.check] = (stats.rejections[r.check] ?? 0) + 1; track(r.id, { stage: r.stage === 'jev' ? 'judged' : 'rejected', detail: r.check }); log.rejection({ bot: BOT, market: r.id, ...r }); },
+      if (TRANSIENT.has(r.check) && scanning.has(r.id)) {
+        const l = scanning.get(r.id); l.retries = (l.retries ?? 0) + 1;
+        if (l.retries <= S.max_transient_retries && (now() - l.received_at) / 1000 < S.max_age_s - 20) { pending.set(r.id, l); stats.requeued = (stats.requeued ?? 0) + 1; r.retry = l.retries; }
+      } stats.rejections[r.check] = (stats.rejections[r.check] ?? 0) + 1; track(r.id, { stage: r.stage === 'jev' ? 'judged' : 'rejected', detail: r.check }); log.rejection({ bot: BOT, market: r.id, ...r }); },
     freeCut: (c) => {
       const age = (now() - c.received_at) / 1000;
       if (age > S.max_age_s) return 'stale_signal';

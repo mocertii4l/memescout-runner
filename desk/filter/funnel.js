@@ -44,7 +44,7 @@ export function createFunnel({ cfg, bench, enrich, judgeCandidate, logRejection 
     const enriched = [];
     for (const c of pool) {
       try { enriched.push({ ...c, ...(await enrich(c)) }); }
-      catch { reject(c, 'enrich', 'enrich_failed'); stats.enrich++; }
+      catch (e) { reject(c, 'enrich', e?.rateLimited || /rate limit/i.test(e?.message ?? '') ? 'rpc_rate_limited' : 'enrich_failed', { error: String(e?.message ?? '').slice(0, 80) }); stats.enrich++; }
     }
 
     // 3: hard facts kill before judgments

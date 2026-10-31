@@ -6,14 +6,14 @@ const READ_ONLY = new Set(['getAccountInfo', 'getMultipleAccounts', 'getTokenLar
 // Token-2022 extensions that let someone else take, freeze, tax or block your tokens.
 export const RISKY_TOKEN_EXTENSIONS = ['transferFeeConfig', 'transferHook', 'permanentDelegate', 'nonTransferable', 'defaultAccountState', 'pausableConfig', 'confidentialTransferMint', 'mintCloseAuthority'];
 
-export function createRpc({ url = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', fetchImpl = fetch, timeoutMs = 8000, retries = 2, rps = Number(process.env.SOLANA_RPC_RPS) || (process.env.SOLANA_RPC_URL ? 25 : 4) } = {}) {
+export function createRpc({ url = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', fetchImpl = fetch, timeoutMs = 8000, retries = 2, rps = Number(process.env.SOLANA_RPC_RPS) || (process.env.SOLANA_RPC_URL ? 8 : 4) /* Helius free plan allows ~10/s; raise SOLANA_RPC_RPS on a paid plan */ } = {}) {
   let id = 0;
   // Pace requests so a burst of candidates doesn't trip the provider's rate limit (the public RPC allows very little).
   let nextSlot = 0;
   const gap = 1000 / Math.max(0.5, rps);
   // Heavy methods get their own, slower lane: the public RPC throttles getTokenLargestAccounts hardest (seen live).
   const HEAVY = new Set(['getTokenLargestAccounts', 'getTransaction']);
-  const heavyGap = Number(process.env.SOLANA_RPC_HEAVY_GAP_MS) || (process.env.SOLANA_RPC_URL ? 100 : 2500);
+  const heavyGap = Number(process.env.SOLANA_RPC_HEAVY_GAP_MS) || (process.env.SOLANA_RPC_URL ? 200 : 2500);
   let nextHeavy = 0;
   async function pace(method) {
     const now = Date.now();

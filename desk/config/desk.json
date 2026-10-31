@@ -162,7 +162,8 @@
     "serial_window_ms": 600000,
     "max_launches_per_creator": 2,
     "allow_unknown_holders": false,
-    "max_state_drift_bps": 1000
+    "max_state_drift_bps": 1000,
+    "max_transient_retries": 3
   },
   "account": {
     "_comment": "Paper account shown on the dashboard. Daily loss and position caps are ENFORCED by each runner's risk engine; the two alert levels below are display-only warnings.",
