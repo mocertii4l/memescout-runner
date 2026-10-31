@@ -1,0 +1,83 @@
+{
+  "_comment": "Every threshold the desk acts on lives here. Edit numbers, not prompts.",
+  "mode_default": "shadow",
+  "block_ms": 400,
+  "decision_deadline_ms": 350,
+  "model_version_pin": "jev-1.13.0",
+  "state_token_budget": 400,
+
+  "risk": {
+    "max_position_usd_per_market": 250,
+    "max_position_usd_total": 250,
+    "daily_loss_limit_usd": 50,
+    "max_leverage": 1,
+    "min_edge_over_costs_bps": 5,
+    "fee_bps": 10,
+    "min_fee_usd": 0,
+    "_min_fee_note": "Set to your venue minimum. A $20 entry against a $0.95 minimum fee loses 4.75% before price moves.",
+    "gas_usd_per_order": 0.02,
+    "exit_volume_pace_ratio": 0.2,
+    "exit_close_within_ms": 60000,
+    "exit_data_retries": 2,
+    "consecutive_error_halt": 5
+  },
+
+  "gambler": {
+    "enter_regimes": ["trending"],
+    "min_setup_score": 2,
+    "min_action_prob": { "long": 0.7, "short": 0.75 },
+    "max_exec_degraded_prob": 0.4,
+    "min_buy_pressure_for_long": 0.6,
+    "ticket_usd": 100,
+    "stop_bps": 40,
+    "take_bps": 80
+  },
+
+  "house": {
+    "grid_levels": 12,
+    "grid_step_bps": 50,
+    "level_size_usd": 20,
+    "pause_breakout_prob": 0.35,
+    "widen_toxic_prob": 0.5,
+    "pull_toxic_prob": 0.75,
+    "min_environment_score": 1.5,
+    "kill_volume_dead_prob": 0.3,
+    "as_gamma": 0.1,
+    "as_kappa": 1.5,
+    "as_horizon_s": 60
+  },
+
+  "spy": {
+    "mirror_labels": ["skilled"],
+    "min_skilled_prob": 0.65,
+    "min_consistent_prob": 0.6,
+    "max_rug_prob": 0.2,
+    "full_ticket_usd": 100,
+    "partial_ticket_usd": 40,
+    "unknown_ticket_scale": 0.5,
+    "max_signal_age_ms": 15000,
+    "max_hold_ticks": 150
+  },
+
+  "funnel": {
+    "min_liquidity_usd": 5000,
+    "min_volume_5m_usd": 1000,
+    "max_top10_holder_pct": 60,
+    "min_age_s": 60,
+    "max_jev_candidates": 5
+  },
+
+  "bench_ttl_ms": {
+    "honeypot": -1,
+    "mint_authority_open": -1,
+    "freeze_authority_open": -1,
+    "liquidity_unlocked": 3600000,
+    "too_young": 1200000,
+    "low_liquidity": 900000,
+    "low_volume": 600000,
+    "concentration": 1800000,
+    "jev_rug": 7200000,
+    "jev_not_worth_it": 1800000,
+    "default": 1800000
+  }
+}
