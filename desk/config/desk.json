@@ -147,5 +147,13 @@
       "window_ms": 15000,
       "max_tx": 25
     }
+  },
+  "account": {
+    "_comment": "Paper account shown on the dashboard. Daily loss and position caps are ENFORCED by each runner's risk engine; the two alert levels below are display-only warnings.",
+    "name": "MOCERTII CAPITAL",
+    "subtitle": "MemeScout desk \u00b7 paper trading",
+    "paper_start_usd": 1000,
+    "alert_max_loss_pct": 10,
+    "alert_drawdown_pct": 10
   }
 }

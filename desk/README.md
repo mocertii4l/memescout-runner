@@ -39,17 +39,31 @@ Test the link from the bot's own host, not your laptop.
 ## Dashboard
 
 ```bash
-npm run dashboard        # http://127.0.0.1:8080, refreshes every 5 s
+npm run dashboard:password   # choose a password; prints DASHBOARD_PASSWORD_HASH=…
+export DASHBOARD_USER=yourname DASHBOARD_PASSWORD_HASH='scrypt$…'   # single quotes: the hash contains $
+npm run dashboard            # http://127.0.0.1:8080 → sign in
 ```
 
-Run it alongside `npm run paper` and/or `npm run solana`. It reads the logs and never writes or trades. It shows:
-- runner health: live / stale / down, feed connected, mock vs real judge
-- paper PnL after fees by bot, plus decisions per minute
-- open positions, the funnel's rejection reasons, risk vetoes, recent decisions with every judge answer, trades, events
-- calibration charts per question
+Run it alongside `npm run paper` and/or `npm run solana`. It reads the logs and never writes or trades.
 
-Each chart has a table view, and the page follows the system light/dark setting. It binds to localhost. To expose it (e.g. as a Render web service), set `DASHBOARD_HOST=0.0.0.0` and a `DASHBOARD_TOKEN` of 24+ characters, then open `/?token=…`.
+- **Top:** UK and UTC clocks, last update, live/feed-down pill, sign out.
+- **Status strip:** Solana scanner, synthetic desk, judge (mock vs Jev), SOL price source.
+- **Account:** equity, balance, floating / today's / total P/L, drawdown from peak and open risk, on a paper account that starts at `account.paper_start_usd` (default $1,000). Headline numbers use the **pessimistic** ledger.
+- **Equity curve:** 1H / 1D / 1W / All range buttons.
+- **Risk dials:**
+  - daily loss and exposure are the limits the risk engines enforce
+  - max loss and drawdown from peak are alert levels only, and are labelled that way
+- **Desk activity:** P/L by bot, decisions per minute, funnel rejections, spot-checks, vetoes, decisions with every judge answer, trades, events, calibration.
 
+**Login and security:**
+- Only a salted scrypt hash of the password is stored.
+- Sessions are random tokens in `HttpOnly; SameSite=Strict` cookies, lasting 12 h.
+- Cross-site POSTs are refused.
+- 5 failed logins lock that client out for 15 minutes.
+- Without a login configured, the dashboard only binds to localhost.
+- To expose it (e.g. a Render web service), set `DASHBOARD_HOST=0.0.0.0`, `DASHBOARD_TRUST_PROXY=1` and `DASHBOARD_SECURE_COOKIE=1`, and serve it over HTTPS.
+
+![sign in](dashboard/screenshot-login.png)
 ![dashboard](dashboard/screenshot-light.png)
 
 ## Live Solana launches (Spy, paper)

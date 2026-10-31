@@ -177,6 +177,7 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
     if (!curve) { if (exitFailures > R.exit_data_retries) reason = 'no_data_after_retries'; else return; }
     else {
       broker.onBook(p.market, curve);
+      p.mark_price_sol = spotPriceSol(curve);
       const move = (Math.log(spotPriceSol(curve) / p.entry_price_sol)) * 1e4;
       reason = curve.complete ? 'graduated' : move >= S.take_bps ? 'take' : move <= -S.stop_bps ? 'stop' : now() - p.opened_ms >= S.max_hold_ms ? 'time_stop' : null;
     }
@@ -253,6 +254,14 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
   function writeStatus(extra = {}) {
     const o = book.open;
     log.status('solana', { runner: 'solana', mode, feed: 'PumpPortal new tokens + Solana RPC', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, realized_optimistic_usd: stats.realized_usd_optimistic, sol_usd: sol, pending: pending.size, counters: stats,
+      ...(() => {
+        // Open profit and risk on the pessimistic ledger (the one the headline uses).
+        const pp = o ? pessBroker.position(o.market) : null;
+        const mark = o?.mark_price_sol ?? o?.entry_price_sol;
+        const costUsd = pp?.cost_sol ? pp.cost_sol * sol.price : 0;
+        return { floating_usd: pp?.tokens && mark ? pp.tokens * mark * sol.price - costUsd : 0, exposure_usd: costUsd, open_risk_usd: (costUsd * S.stop_bps) / 1e4,
+          limits: { daily_loss_limit_usd: riskCfg.risk.daily_loss_limit_usd, max_position_usd_total: riskCfg.risk.max_position_usd_total } };
+      })(),
       open: o ? [{ bot: 'launch', lead_id: o.lead_id, market: o.market, symbol: o.display?.symbol ?? null, side: 'buy', entry_price_sol: o.entry_price_sol, held_s: Math.round((now() - o.opened_ms) / 1000) }] : [], ...extra });
   }
 

@@ -33,17 +33,50 @@ test('aggregate builds KPIs, cumulative PnL and filters by bot', () => {
   assert.equal(aggregate({ dir, day: '2026-10-31', bot: 'launch' }).kpis.decisions, 1);
 });
 
-test('dashboard requires its token when one is set, and is read-only', async () => {
+test('login: password hashing, sessions, lockout, and protected API', async () => {
+  const { hashPassword, verifyPassword, createAuth } = await import('../dashboard/auth.js');
+  assert.throws(() => hashPassword('short'), /at least 10/);
+  const hash = hashPassword('correct horse battery');
+  assert.ok(!hash.includes('correct'));
+  assert.ok(verifyPassword('correct horse battery', hash));
+  assert.ok(!verifyPassword('wrong password!!', hash));
+
   const dir = seed();
-  const srv = createDashboard({ token: 't'.repeat(30), dir });
+  const auth = createAuth({ user: 'mocertii', passwordHash: hash, maxFailures: 3 });
+  const srv = createDashboard({ auth, dir });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${srv.address().port}`;
+  const login = (u, p, extra = {}) => fetch(base + '/login', { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', ...extra }, body: new URLSearchParams({ username: u, password: p }) });
   try {
     assert.equal((await fetch(base + '/api/summary')).status, 401);
-    const ok = await fetch(base + '/api/summary?day=2026-10-31&token=' + 't'.repeat(30));
-    assert.equal(ok.status, 200);
-    assert.equal((await ok.json()).kpis.decisions, 2);
-    assert.equal((await fetch(base + '/api/summary?token=' + 't'.repeat(30), { method: 'POST' })).status, 405);
+    const page = await fetch(base + '/', { redirect: 'manual' });
+    assert.equal(page.status, 303); assert.equal(page.headers.get('location'), '/login');
+    assert.match(await (await fetch(base + '/login')).text(), /Sign in/);
+
+    const bad = await login('mocertii', 'nope nope nope');
+    assert.equal(bad.headers.get('location'), '/login?e=invalid');
+    assert.equal(bad.headers.get('set-cookie'), null);
+
+    const evil = await login('mocertii', 'correct horse battery', { origin: 'https://evil.example' });
+    assert.equal(evil.status, 403, 'cross-origin login post is refused');
+
+    const ok = await login('mocertii', 'correct horse battery');
+    const cookie = ok.headers.get('set-cookie');
+    assert.match(cookie, /HttpOnly/); assert.match(cookie, /SameSite=Strict/);
+    const sid = cookie.split(';')[0];
+    const api = await fetch(base + '/api/summary?day=2026-10-31', { headers: { cookie: sid } });
+    assert.equal(api.status, 200);
+    const body = await api.json();
+    assert.equal(body.kpis.decisions, 2);
+    assert.equal(body.viewer.user, 'mocertii');
+    assert.ok(body.account.equity_usd > 0);
+
+    await fetch(base + '/logout', { method: 'POST', redirect: 'manual', headers: { cookie: sid } });
+    assert.equal((await fetch(base + '/api/summary', { headers: { cookie: sid } })).status, 401, 'session ends at logout');
+
+    await login('x', 'y'); await login('x', 'y'); await login('x', 'y');
+    const locked = await login('mocertii', 'correct horse battery');
+    assert.equal(locked.headers.get('location'), '/login?e=locked', 'too many failures locks the client out, even with the right password');
   } finally { srv.close(); }
 });
 

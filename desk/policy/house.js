@@ -30,7 +30,7 @@ export function housePolicy(answers, state, cfg) {
   if (breakout === undefined || breakout === null) return { intent: 'pause', why: ['range_state=unknown'] };
   if (breakout >= c.pause_breakout_prob) return { intent: 'pause', why: [`breakout=${breakout.toFixed(2)}`] };
   if (toxic === null || toxic === undefined || toxic >= c.pull_toxic_prob) return { intent: 'pull', why: [`toxic=${toxic ?? 'unknown'}`] };
-  if (env === null || env === undefined || env < c.min_environment_score) return { intent: 'pause', why: [`environment=${env ?? 'unknown'}`] };
+  if (env === null || env === undefined || env < c.min_environment_score) return { intent: 'pause', why: [`environment=${env == null ? 'unknown' : env.toFixed(2)}`] };
   // Unknown is its own consequence: a wider quote, not a guess.
   const widen = toxic >= c.widen_toxic_prob ? 2 : 1;
   return { intent: 'quote', step_bps: c.grid_step_bps * widen, level_size_usd: c.level_size_usd, levels: c.grid_levels, why: widen > 1 ? ['widened: toxic flow'] : ['quote'] };

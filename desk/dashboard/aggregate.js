@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { readStream, LOG_DIR } from '../reports/read.js';
 import { calibrationReport } from '../reports/calibration.js';
+import { loadConfig } from '../config/index.js';
 
 const botOf = (r) => r.bot ?? (String(r.market ?? '').startsWith('HOUSE-') ? 'house' : 'gambler');
 
@@ -16,7 +17,7 @@ export function readStatuses(dir = LOG_DIR) {
   return readdirSync(dir).filter((f) => /^status-.*\.json$/.test(f)).map((f) => { try { return JSON.parse(readFileSync(join(dir, f), 'utf8')); } catch { return null; } }).filter(Boolean);
 }
 
-export function aggregate({ day, bot = 'all', dir = LOG_DIR, now = Date.now() } = {}) {
+export function aggregate({ day, bot = 'all', dir = LOG_DIR, now = Date.now(), cfg = loadConfig() } = {}) {
   day ??= availableDays(dir)[0] ?? new Date(now).toISOString().slice(0, 10);
   const keep = (r) => bot === 'all' || botOf(r) === bot;
   const decisions = readStream('decisions', { dir, day }).filter(keep);
@@ -90,6 +91,7 @@ export function aggregate({ day, bot = 'all', dir = LOG_DIR, now = Date.now() } 
       price: t.fill_price ?? t.fill_price_sol ?? null, notional_usd: t.notional_usd ?? t.order?.notional_usd ?? null, realized_usd: t.realized_usd ?? t.pnl_usd ?? null, fee_usd: t.fee_usd ?? null,
     })),
     spotcheck: summarizeSpotchecks(spotchecks),
+    account: account({ dir, statuses, cfg, now, keep }),
     recent_events: events.filter((e) => e.type !== 'funnel').slice(-30).reverse(),
     calibration: calibrationReport(outcomes.filter((r) => Number.isFinite(r.p))).filter((q) => q.n >= 5).sort((a, b) => b.n - a.n).slice(0, 8)
       .map(({ question, n, brier, base_rate, ece, buckets }) => ({ question, n, brier, base_rate, ece, buckets })),
@@ -120,5 +122,48 @@ function summarizeSpotchecks(rows) {
     // Share of fills where even the pessimistic ledger did BETTER than real traders — it isn't pessimistic enough.
     pessimistic_too_kind_share: share(ok.map((r) => r.pessimistic_bps)),
     recent: rows.slice(-25).reverse().map((r) => ({ ts: r.fill_ts ?? r.ts, market: r.market, side: r.side, optimistic_bps: r.optimistic_bps, pessimistic_bps: r.pessimistic_bps, real_median_price_sol: r.real_median_price_sol, optimistic_price_sol: r.optimistic_price_sol, pessimistic_price_sol: r.pessimistic_price_sol, n: r.real_trades_in_window })),
+  };
+}
+
+/**
+ * The paper account across ALL days: start balance + realized (pessimistic / counted ledgers) + open profit.
+ * Daily loss and exposure caps come from the runners' own risk engines (enforced).
+ * Max-loss and drawdown alert levels are display-only.
+ */
+function account({ dir, statuses, cfg, now, keep }) {
+  const A = cfg.account ?? { paper_start_usd: 1000, alert_max_loss_pct: 10, alert_drawdown_pct: 10 };
+  const start = A.paper_start_usd;
+  const all = readStream('trades', { dir }).filter(keep).filter((t) => t.ledger !== 'optimistic');
+  const realizedRows = all.filter((t) => (['filled', 'failed', 'written_off'].includes(t.status) || t.shadow_exit) && Number.isFinite(t.realized_usd ?? t.pnl_usd)).sort((a, b) => a.ts - b.ts);
+  let bal = start;
+  const curve = [[realizedRows[0]?.ts ?? now, start]];
+  for (const t of realizedRows) { bal += t.realized_usd ?? t.pnl_usd; curve.push([t.ts, +bal.toFixed(4)]); }
+  const live = statuses.filter((s) => now - s.ts < 180000);
+  const floating = live.reduce((x, s) => x + (s.floating_usd ?? 0), 0);
+  const exposure = live.reduce((x, s) => x + (s.exposure_usd ?? 0), 0);
+  const openRisk = live.reduce((x, s) => x + (s.open_risk_usd ?? 0), 0);
+  const equity = bal + floating;
+  curve.push([now, +equity.toFixed(4)]);
+  const peak = Math.max(start, ...curve.map((p) => p[1]));
+  const dayStart = new Date(new Date(now).toISOString().slice(0, 10)).getTime();
+  const realizedToday = realizedRows.filter((t) => t.ts >= dayStart).reduce((x, t) => x + (t.realized_usd ?? t.pnl_usd), 0);
+  const exits = readStream('events', { dir }).filter(keep).filter((e) => e.type === 'exit' && e.ledger !== 'optimistic' && Number.isFinite(e.realized_usd));
+  const dailyLimit = statuses.reduce((x, s) => x + (s.limits?.daily_loss_limit_usd ?? 0), 0);
+  const posCap = statuses.reduce((x, s) => x + (s.limits?.max_position_usd_total ?? 0), 0);
+  const openCount = live.reduce((x, s) => x + (s.open?.filter((o) => o.note !== 'shadow').length ?? 0), 0);
+  return {
+    name: A.name ?? 'Paper desk', subtitle: A.subtitle ?? '', start_usd: start,
+    equity_usd: equity, balance_usd: bal, floating_usd: floating, exposure_usd: exposure, free_usd: equity - exposure, leverage: 'none (1:1)',
+    total_pnl_usd: equity - start, today_pnl_usd: realizedToday + floating, day_start_usd: equity - realizedToday - floating,
+    closed_trades: exits.length, win_rate: exits.length ? exits.filter((e) => e.realized_usd > 0).length / exits.length : null, open_positions: openCount,
+    peak_usd: peak, drawdown_usd: peak - equity, drawdown_pct: peak > 0 ? ((peak - equity) / peak) * 100 : 0,
+    open_risk_usd: openRisk,
+    limits: {
+      daily_loss: { used_usd: Math.max(0, -(realizedToday + floating)), limit_usd: dailyLimit, enforced: true },
+      exposure: { used_usd: exposure, limit_usd: posCap, enforced: true },
+      max_loss: { used_usd: Math.max(0, start - equity), limit_usd: (start * A.alert_max_loss_pct) / 100, enforced: false },
+      drawdown: { used_usd: peak - equity, limit_usd: (peak * A.alert_drawdown_pct) / 100, enforced: false },
+    },
+    equity_curve: curve.length > 1500 ? curve.filter((_, i) => i % Math.ceil(curve.length / 1500) === 0 || i === curve.length - 1) : curve,
   };
 }

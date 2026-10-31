@@ -109,16 +109,17 @@ export function createDesk({ mode = 'shadow', cfg = loadConfig(), judge, logger 
     const reason = moveBps <= -pos.stop_bps ? 'stop' : moveBps >= pos.take_bps ? 'take' : null;
     if (!reason) return;
     // EXIT seat: arithmetic only. Doesn't re-read the answers that opened the trade.
+    let tradePnl = null;
     if (mode === 'paper') {
       const res = await broker.place({ market: pos.market, side: pos.side === 'buy' ? 'sell' : 'buy', notional_usd: Math.abs(broker.position(pos.market).qty) * full.mid, type: 'market', client_id: `exit-${pos.lead_id}` });
-      if (res.status === 'filled') risk.recordPnl(res.realized_usd - pos.entry_fee);
+      if (res.status === 'filled') { tradePnl = res.realized_usd - pos.entry_fee; risk.recordPnl(tradePnl); }
     } else {
       const pnl = (moveBps / 1e4) * pos.notional_usd - (costBps(pos.notional_usd, cfg.risk) / 1e4) * pos.notional_usd;
-      risk.recordPnl(pnl);
+      risk.recordPnl(pnl); tradePnl = pnl;
       delete shadowPositions[pos.market];
       log.trade({ mode, shadow_exit: true, lead_id: pos.lead_id, reason, pnl_usd: pnl });
     }
-    log.event({ type: 'exit', lead_id: pos.lead_id, reason, move_bps: moveBps });
+    log.event({ bot: 'gambler', type: 'exit', lead_id: pos.lead_id, reason, move_bps: moveBps, realized_usd: tradePnl });
     books.gambler.release(pos.lead_id, 'EXIT');
   }
 
@@ -242,10 +243,17 @@ export function createDesk({ mode = 'shadow', cfg = loadConfig(), judge, logger 
   function writeStatus(snap) {
     const mid = snap.bars.at(-1).close;
     const open = [];
+    let floating = 0, exposure = 0, openRisk = 0;
+    const g = books.gambler.open;
+    if (g) { const dir = g.side === 'buy' ? 1 : -1; floating += dir * (mid / g.entry - 1) * g.notional_usd; exposure += g.notional_usd; openRisk += (g.notional_usd * g.stop_bps) / 1e4; }
+    const hp = broker.position('HOUSE-' + snap.market);
+    if (hp.qty) { floating += hp.qty * (mid - hp.avg); exposure += Math.abs(hp.qty * mid); }
     if (books.gambler.open) open.push({ bot: 'gambler', lead_id: books.gambler.open.lead_id, market: books.gambler.open.market, side: books.gambler.open.side, entry: books.gambler.open.entry, mark: mid, notional_usd: books.gambler.open.notional_usd });
     if (books.spy.open) open.push({ bot: 'spy', lead_id: books.spy.open.lead_id, market: books.spy.open.market, side: 'buy', note: 'shadow' });
     if (grid.active) open.push({ bot: 'house', lead_id: 'grid', market: 'HOUSE-' + snap.market, side: 'grid', resting_orders: broker.restingOrders().length, range: grid.range });
-    log.status('desk', { runner: 'synthetic', mode, tick, block_ms: cfg.block_ms, feed: 'synthetic (generated prices)', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, counters, open, mark: mid });
+    log.status('desk', { runner: 'synthetic', mode, tick, block_ms: cfg.block_ms, feed: 'synthetic (generated prices)', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, counters, open, mark: mid,
+      floating_usd: floating, exposure_usd: exposure, open_risk_usd: openRisk,
+      limits: { daily_loss_limit_usd: cfg.risk.daily_loss_limit_usd, max_position_usd_total: cfg.risk.max_position_usd_total + cfg.house.grid_levels * cfg.house.level_size_usd } });
   }
 
   return { step, counters, risk, broker, books, get tick() { return tick; } };
