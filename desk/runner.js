@@ -21,6 +21,7 @@ import { createJudgeClient, createLocalJudge } from './judge/client.js';
 import { createMockJev } from './judge/jev-client.js';
 import { createMarketFeed, createWalletFeed } from './feeds/synthetic.js';
 import { rowsFor, horizonBars, gamblerLabels, houseLabels, spyLabels } from './outcomes/resolvers.js';
+import { isMain, flag } from './config/main.js';
 
 const RULEBOOK_SETUP = 'Pullback to rising short-term trend: b60 and b20 returns positive, b5 slightly negative, imbalance turning positive, spread tight.';
 
@@ -262,9 +263,9 @@ export function createDesk({ mode = 'shadow', cfg = loadConfig(), judge, logger 
 const round = (x, dp) => (Number.isFinite(x) ? Number(x.toFixed(dp)) : null);
 
 // ---------------------------------------------------------------- entrypoint
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const cfg = loadConfig();
-  const mode = process.env.DESK_MODE || cfg.mode_default;
+  const mode = flag('mode', 'DESK_MODE', cfg.mode_default);
   const ticks = Number(process.env.DESK_TICKS || 0); // 0 = run until stopped
   const judge = process.env.JUDGE_URL
     ? createJudgeClient()

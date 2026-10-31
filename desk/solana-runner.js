@@ -24,6 +24,7 @@ import { createRpc, solUsd } from './feeds/solana-rpc.js';
 import { spotPriceSol, curveProgress } from './feeds/pumpcurve.js';
 import { rowsFor } from './outcomes/resolvers.js';
 import { fetchRealTrades, compareFill } from './feeds/spotcheck.js';
+import { isMain, flag } from './config/main.js';
 
 const TOTAL_SUPPLY = 1_000_000_000;
 const MIGRATION_RESERVE = 206_900_000; // tokens the curve account keeps for migration
@@ -269,9 +270,9 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
 }
 
 // ---------------------------------------------------------------- entrypoint
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const cfg = loadConfig();
-  const mode = process.env.DESK_MODE || 'paper';
+  const mode = flag('mode', 'DESK_MODE', 'paper');
   if (!['paper', 'shadow'].includes(mode)) throw new Error('paper or shadow only');
   const judge = process.env.JUDGE_URL
     ? createJudgeClient()

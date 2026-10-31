@@ -3,6 +3,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { readStream, LOG_DIR } from './read.js';
+import { isMain, flag } from '../config/main.js';
 
 export function brier(rows) { return rows.length ? rows.reduce((s, r) => s + (r.p - r.y) ** 2, 0) / rows.length : null; }
 
@@ -53,7 +54,7 @@ export function calibrationReport(rows, { minRows = 30 } = {}) {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const rows = readStream('outcomes').filter((r) => Number.isFinite(r.p));
   const report = calibrationReport(rows);
   const outDir = join(LOG_DIR, 'reports');

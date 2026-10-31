@@ -3,6 +3,7 @@
 // - Sessions are random 256-bit tokens in an HttpOnly, SameSite=Strict cookie (Secure behind HTTPS).
 // - Failed logins are rate-limited per client and globally.
 import { scryptSync, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
+import { isMain, flag } from '../config/main.js';
 
 const N = 16384, R = 8, P = 1, KEYLEN = 32;
 
@@ -73,7 +74,7 @@ export function readCookie(req, name) {
 }
 
 // CLI: print a hash to put in DASHBOARD_PASSWORD_HASH.  Usage:  npm run dashboard:password
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const { createInterface } = await import('node:readline');
   const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
   rl._writeToOutput = (s) => { if (!rl.muted) rl.output.write(s); };

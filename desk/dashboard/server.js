@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { aggregate } from './aggregate.js';
 import { createAuth, readCookie } from './auth.js';
+import { isMain, flag } from '../config/main.js';
 
 const PAGE = fileURLToPath(new URL('./index.html', import.meta.url));
 const LOGIN = fileURLToPath(new URL('./login.html', import.meta.url));
@@ -64,7 +65,7 @@ export function createDashboard({ auth = createAuth({ user: process.env.DASHBOAR
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const host = process.env.DASHBOARD_HOST || '127.0.0.1';
   const port = Number(process.env.PORT || process.env.DASHBOARD_PORT || 8080);
   const server = createDashboard();

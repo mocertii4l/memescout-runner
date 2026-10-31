@@ -1,5 +1,6 @@
 // Daily summary: decisions, trades, PnL after fees, every risk veto that fired, every fallback.
 import { readStream } from './read.js';
+import { isMain, flag } from '../config/main.js';
 
 export function dailySummary(day) {
   const decisions = readStream('decisions', { day });
@@ -27,7 +28,7 @@ export function dailySummary(day) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const day = process.argv[2] || new Date().toISOString().slice(0, 10);
   console.log(JSON.stringify(dailySummary(day), null, 2));
 }

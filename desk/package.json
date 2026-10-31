@@ -9,13 +9,13 @@
   },
   "scripts": {
     "judge": "node judge/server.js",
-    "shadow": "DESK_MODE=shadow node runner.js",
-    "paper": "DESK_MODE=paper node runner.js",
+    "shadow": "node runner.js --mode=shadow",
+    "paper": "node runner.js --mode=paper",
     "report:calibration": "node reports/calibration.js",
     "report:daily": "node reports/daily.js",
     "test": "node --test test/*.test.js",
-    "solana": "DESK_MODE=paper node solana-runner.js",
-    "solana:shadow": "DESK_MODE=shadow node solana-runner.js",
+    "solana": "node solana-runner.js --mode=paper",
+    "solana:shadow": "node solana-runner.js --mode=shadow",
     "dashboard": "node dashboard/server.js",
     "dashboard:password": "node dashboard/auth.js"
   }

@@ -4,6 +4,7 @@
 // Never signs, never holds a key: same paper-only guarantees as the individual scripts.
 import { spawn } from 'node:child_process';
 import { mkdirSync, accessSync, constants } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const wanted = process.env.DESK_LOG_DIR || '/var/data/logs';
 let logDir = wanted;
@@ -27,7 +28,7 @@ const children = new Map();
 
 function run(job, attempt = 0) {
   if (stopping) return;
-  const child = spawn(process.execPath, [job.file], { stdio: 'inherit', env, cwd: new URL('.', import.meta.url).pathname });
+  const child = spawn(process.execPath, [job.file], { stdio: 'inherit', env, cwd: fileURLToPath(new URL('.', import.meta.url)) });
   const started = Date.now();
   children.set(job.name, child);
   child.on('exit', (code, signal) => {

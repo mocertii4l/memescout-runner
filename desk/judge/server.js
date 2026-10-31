@@ -7,6 +7,7 @@ import { batteries } from '../questions/index.js';
 import { loadConfig } from '../config/index.js';
 import { createJevClient, createMockJev } from './jev-client.js';
 import { JudgeError } from './errors.js';
+import { isMain, flag } from '../config/main.js';
 
 const MAX_BODY = 64 * 1024;
 
@@ -51,7 +52,7 @@ export function createJudge({ ask, deskSecret, model, maxTimeoutMs = 2000 }) {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const cfg = loadConfig();
   const useMock = process.env.JEV_MOCK === '1' || !process.env.JEV_API_KEY;
   const model = process.env.JEV_MODEL || cfg.model_version_pin;
