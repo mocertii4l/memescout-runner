@@ -284,8 +284,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const stop = () => { stopping = true; feed.stop(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   const loop = async (fn, ms, name) => { while (!stopping) { const t = Date.now(); try { await fn(); } catch (e) { console.log(`${name} error: ${e.message}`); } const end = Date.now() + Math.max(250, ms - (Date.now() - t)); while (!stopping && Date.now() < end) await new Promise((r) => setTimeout(r, Math.min(500, end - Date.now()))); } };
+  let beats = 0;
   const heartbeat = async () => {
     desk.writeStatus({ feed_connected: feed.connected, feed_last_message_at: feed.lastMessageAt });
+    if ((beats = (beats + 1) % 6) !== 1) return; // status every 10 s, console line every minute
     const s = desk.stats, o = desk.book.open;
     console.log(new Date().toISOString(), JSON.stringify({ seen: s.launches_seen, pending: desk.pending.size, scanned: s.scanned, judged: s.judged, entries: s.entries, exits: s.exits, pnl_usd: +s.realized_usd.toFixed(2), open: o ? `${o.display?.symbol ?? ''} ${o.market.slice(0, 6)}…` : null, halted: desk.risk.halted, top_rejections: Object.entries(s.rejections).sort((a, b) => b[1] - a[1]).slice(0, 4) }));
   };

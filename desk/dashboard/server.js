@@ -28,6 +28,9 @@ export function createDashboard({ auth = createAuth({ user: process.env.DASHBOAR
       if (host !== req.headers.host) return send(403, base, 'bad origin');
     }
 
+    // Unauthenticated liveness probe for the host. Reveals nothing about the desk.
+    if (url.pathname === '/healthz' && req.method === 'GET') return send(200, { ...base, 'content-type': 'text/plain' }, 'ok');
+
     if (url.pathname === '/login') {
       if (!auth.enabled) return redirect('/');
       if (req.method === 'GET') return send(200, html, readFileSync(LOGIN));
