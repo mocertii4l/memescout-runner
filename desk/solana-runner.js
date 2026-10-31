@@ -370,7 +370,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
 
   function writeStatus(extra = {}) {
     const o = book.open;
-    log.status(STATUS, { runner: STATUS, profile, mode, feed: 'PumpPortal new tokens + Solana RPC', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, realized_optimistic_usd: stats.realized_usd_optimistic, sol_usd: sol, pending: pending.size, counters: stats,
+    log.status(STATUS, { runner: STATUS, profile, mode, rpc: process.env.SOLANA_RPC_URL ? 'custom' : 'public', feed: 'PumpPortal new tokens + Solana RPC', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, realized_optimistic_usd: stats.realized_usd_optimistic, sol_usd: sol, pending: pending.size, counters: stats,
       ...(() => {
         // Open profit and risk on the pessimistic ledger (the one the headline uses).
         const pp = o ? pessBroker.position(o.market) : null;

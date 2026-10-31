@@ -240,7 +240,7 @@ function table(cols, rows) {
 }
 
 function runnerState(s) {
-  if (!s) return { label: 'NOT STARTED', k: 'down' };
+  if (!s) return { label: 'OFF', k: '' };
   const age = (Date.now() - s.ts) / 1000;
   if (s.halted) return { label: 'HALTED', k: 'down' };
   if (age >= 180) return { label: 'DOWN', k: 'down' };
@@ -261,15 +261,15 @@ function renderStrip(d) {
   const any = d.statuses[0];
   $('strip').replaceChildren(
     svcCard('Solana scanner', runnerState(sol), sol ? `${sol.counters.launches_seen.toLocaleString()} seen` : '—', sol ? `${sol.pending} waiting · ${sol.counters.judged} judged · ${sol.counters.entries} entries` : 'start: npm run solana',
-      sol && !sol.feed_connected ? 'PumpPortal not connected' : loose ? `Loose desk also on: ${loose.counters.judged} judged · ${loose.counters.entries} entries · ${fmtSigned(loose.realized_today_usd)} (not in equity)` : null),
-    svcCard('Synthetic desk', runnerState(syn), syn ? `block ${syn.tick.toLocaleString()}` : '—', syn ? `${syn.block_ms} ms blocks · generated prices` : 'start: npm run paper'),
+      sol && !sol.feed_connected ? 'PumpPortal not connected' : sol && sol.rpc === 'public' && (sol.counters.rejections?.rpc_rate_limited ?? 0) >= 5 ? 'Free Solana RPC is throttling holder checks: set SOLANA_RPC_URL (Helius)' : loose ? `Loose desk also on: ${loose.counters.judged} judged · ${loose.counters.entries} entries · ${fmtSigned(loose.realized_today_usd)} (not in equity)` : null),
+    svcCard('Synthetic desk', runnerState(syn), syn ? `block ${syn.tick.toLocaleString()}` : 'off', syn ? `${syn.block_ms} ms blocks · generated prices` : 'demo with generated prices (optional)'),
     svcCard('Judge', { label: any ? (any.judge === 'mock judge' ? 'MOCK' : 'JEV') : '—', k: any?.judge === 'mock judge' ? 'warn' : 'live' }, d.kpis.latency_p50 == null ? '—' : `${d.kpis.latency_p50} ms`, any ? `p95 ${d.kpis.latency_p95 ?? '—'} ms · pin ${any.model_pin}` : '',
       any?.judge === 'mock judge' ? 'Rules, not Jev: proves plumbing only' : null),
     svcCard('SOL / USD', { label: sol?.sol_usd?.source === 'jupiter' ? 'JUPITER' : 'FALLBACK', k: sol?.sol_usd?.source === 'jupiter' ? 'live' : 'warn' }, sol?.sol_usd ? fmtUsd(sol.sol_usd.price) : '—', sol?.sol_usd?.source === 'jupiter' ? 'live price feed' : 'config fallback price'),
     el('div', { class: 'card notice' }, el('div', { class: 'title' }, 'Paper trading only'),
       el('ul', {}, el('li', {}, 'No keys, no signing, no live broker.'), el('li', {}, 'Headline P/L uses the pessimistic ledger.'), el('li', {}, 'Crypto trades 24/7; daily limits reset 00:00 UTC.'))),
   );
-  const states = [sol, syn].filter(Boolean).map(runnerState);
+  const states = [sol, syn].filter(Boolean).map(runnerState).filter((x) => x.k);
   const worst = states.find((s) => s.k === 'down') ?? states.find((s) => s.k === 'warn') ?? states[0] ?? { label: 'NO RUNNERS', k: 'down' };
   $('livePill').className = 'pill ' + worst.k; $('liveText').textContent = worst.k === 'live' ? 'LIVE' : worst.label;
 }
@@ -311,7 +311,7 @@ const timeLabel = (t, span) => new Date(t).toLocaleString('en-GB', span > 864000
 function equityChart(host, pts, start) {
   host.replaceChildren();
   if (range) { const cut = Date.now() - range; const before = pts.filter((p) => p[0] < cut).at(-1); pts = [...(before ? [[cut, before[1]]] : []), ...pts.filter((p) => p[0] >= cut)]; }
-  if (pts.length < 2) { host.append(el('div', { class: 'empty' }, 'No closed trades in this range yet')); $('rangeDelta').textContent = ''; $('equityTable').replaceChildren(); return; }
+  if (pts.length < 2 || pts.every((p) => p[1] === pts[0][1])) { host.append(el('div', { class: 'empty' }, pts.length < 2 ? 'No closed trades in this range yet' : 'No closed trades yet. The curve starts with the first paper sell.')); $('rangeDelta').textContent = ''; $('equityTable').replaceChildren(); return; }
   const d0 = pts[pts.length - 1][1] - pts[0][1];
   $('rangeDelta').replaceChildren(el('span', { class: cls(d0) }, fmtSigned(d0)), ' over this range');
   const W = host.clientWidth || 800, H = 250, L = 8, R = 92, T = 10, B = 24;
