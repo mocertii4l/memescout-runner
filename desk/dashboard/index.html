@@ -115,6 +115,10 @@ details summary { cursor: pointer; color: var(--muted); font-size: 11.5px; margi
 .mini { background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 .mini .v { font-size: 18px; margin-top: 4px; }
 .mini .n { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.stage { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 650; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.stage.waiting { color: var(--muted); } .stage.rejected, .stage.expired { color: var(--text-secondary); } .stage.judged { color: #8fb8f0; }
+.stage.picked, .stage.bought { color: var(--up); border-color: rgba(63,207,142,.35); } .stage.sold { color: var(--gold); border-color: rgba(214,168,78,.35); }
+a.lnk { color: var(--gold); text-decoration: none; font-size: 11.5px; } a.lnk:hover { text-decoration: underline; }
 .warnrow { display: flex; gap: 6px; font-size: 11px; color: var(--text-secondary); margin-top: 6px; }
 </style>
 </head>
@@ -162,6 +166,8 @@ details summary { cursor: pointer; color: var(--muted); font-size: 11.5px; margi
   </div>
 
   <div id="body" class="grid">
+    <div class="card span-12"><div class="cardhead"><h2>Live launches · Solana</h2><span class="aside">newest first · each launch waits ~45 s, then goes through the funnel</span><span class="right aside mono" id="launchCounts"></span></div>
+      <div class="scroll" id="launches" style="max-height:420px"></div></div>
     <div class="card span-8"><div class="cardhead"><h2>P/L by bot (cumulative, after fees)</h2></div><div class="legend" id="pnlLegend"></div><div id="pnlChart"></div>
       <details><summary>View as table</summary><div class="scroll" id="pnlTable"></div></details></div>
     <div class="card span-4"><div class="cardhead"><h2>Open positions</h2></div><div id="positions"></div></div>
@@ -479,6 +485,8 @@ function render(d) {
   $('dpmTable').replaceChildren(table([{ label: 'minute', get: (r) => fmtTime(r.t) }, ...keys.map((k) => ({ label: k.label, num: true, get: (r) => r[k.key] }))], [...d.decisions_per_min].reverse()));
   hBars($('rejChart'), d.rejections_by_check);
 
+  renderLaunches(d);
+
   const sc = d.spotcheck, bps = (x) => x == null ? '—' : `${x > 0 ? '+' : ''}${Math.round(x)} bps`;
   const flatter = (x) => x == null ? el('span', {}, '—') : el('span', { class: x > 0 ? 'neg' : 'pos' }, (x > 0 ? '▲ ' : '▼ ') + bps(x));
   const mini = (label, value, note) => el('div', { class: 'mini' }, el('div', { class: 'eyebrow' }, label), el('div', { class: 'v mono' }, value), el('div', { class: 'n' }, note));
@@ -530,6 +538,23 @@ function render(d) {
   const cal = $('calibration'); cal.replaceChildren();
   if (!d.calibration.length) cal.append(el('div', { class: 'empty' }, 'Not enough resolved outcomes yet (needs 5+ per question)'));
   for (const q of d.calibration) cal.append(el('div', {}, el('div', { class: 'q', title: q.question }, q.question), el('div', { class: 'm' }, `n=${q.n} · Brier ${q.brier.toFixed(3)} · gap ${q.ece.toFixed(3)}`), reliability(q)));
+}
+
+const MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const STAGE_ICON = { waiting: '◷', rejected: '✕', expired: '–', judged: '?', picked: '★', bought: '●', sold: '◆' };
+function renderLaunches(d) {
+  const sol = d.statuses.find((s) => s.runner === 'solana');
+  const rows = sol?.recent_launches ?? [];
+  const by = rows.reduce((m, r) => ((m[r.stage] = (m[r.stage] ?? 0) + 1), m), {});
+  $('launchCounts').textContent = rows.length ? Object.entries(by).map(([k, v]) => `${v} ${k}`).join(' · ') : '';
+  $('launches').replaceChildren(rows.length ? table([
+    { label: 'launched', get: (r) => el('span', {}, fmtTime(r.received_at), el('span', { class: 'muted' }, ` · ${ago(r.received_at)}`)) },
+    { label: 'token', get: (r) => el('span', {}, el('b', { style: 'color:var(--text-primary)' }, r.symbol || '—'), el('span', { class: 'muted' }, r.name ? `  ${short(r.name, 28)}` : '')) },
+    { label: 'stage', get: (r) => el('span', { class: 'stage ' + r.stage }, `${STAGE_ICON[r.stage] ?? ''} ${r.stage}`) },
+    { label: 'what happened', get: (r) => String(r.detail ?? '').replaceAll('_', ' ') },
+    { label: 'mint', cls: 'mono', get: (r) => short(r.mint, 8) },
+    { label: 'look it up', get: (r) => MINT_RE.test(r.mint) ? el('span', {}, el('a', { class: 'lnk', href: `https://pump.fun/coin/${r.mint}`, target: '_blank', rel: 'noopener noreferrer' }, 'pump.fun'), '  ', el('a', { class: 'lnk', href: `https://solscan.io/token/${r.mint}`, target: '_blank', rel: 'noopener noreferrer' }, 'solscan')) : '—' },
+  ], rows) : el('div', { class: 'empty' }, sol ? 'Waiting for the first launch…' : 'Start the scanner: npm run solana'));
 }
 
 async function load() {

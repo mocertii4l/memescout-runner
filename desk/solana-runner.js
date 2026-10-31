@@ -75,8 +75,18 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
   const stats = { realized_usd_optimistic: 0, pess_entry_failed: 0, pess_exit_failed: 0, written_off: 0, spotchecks: 0, launches_seen: 0, dropped: 0, expired: 0, scanned: 0, judged: 0, entries: 0, exits: 0, vetoes: 0, rejections: {}, realized_usd: 0 };
   let sol = { price: S.sol_usd_fallback, source: 'config_fallback' }, exitFailures = 0;
 
+  // Last N launches with what happened to each, for the dashboard's "Live launches" table.
+  const recent = new Map();
+  function track(mint, patch) {
+    const cur = recent.get(mint);
+    if (!cur && !patch.received_at) return;
+    recent.set(mint, { ...(cur ?? {}), ...patch, updated_at: now() });
+    if (recent.size > 60) recent.delete(recent.keys().next().value);
+  }
+
   function onLaunch(l) {
     stats.launches_seen++;
+    track(l.mint, { mint: l.mint, symbol: l._display?.symbol ?? '', name: l._display?.name ?? '', received_at: l.received_at, stage: 'waiting', detail: `checks after ${S.min_age_s}s` });
     if (pending.size >= S.max_pending) { pending.delete(pending.keys().next().value); stats.dropped++; }
     pending.set(l.mint, { ...l, lead_id: `S-${l.mint.slice(0, 8)}-${l.received_at.toString(36)}` });
   }
@@ -84,7 +94,7 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
   const funnel = createFunnel({
     cfg: { ...cfg, funnel: { ...cfg.funnel, max_jev_candidates: S.max_jev_candidates } },
     bench,
-    logRejection: (r) => { stats.rejections[r.check] = (stats.rejections[r.check] ?? 0) + 1; log.rejection({ bot: 'launch', market: r.id, ...r }); },
+    logRejection: (r) => { stats.rejections[r.check] = (stats.rejections[r.check] ?? 0) + 1; track(r.id, { stage: r.stage === 'jev' ? 'judged' : 'rejected', detail: r.check }); log.rejection({ bot: 'launch', market: r.id, ...r }); },
     freeCut: (c) => {
       const age = (now() - c.received_at) / 1000;
       if (age > S.max_age_s) return 'stale_signal';
@@ -123,6 +133,7 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
       stats.judged++;
       const answers = res.response.answers;
       const intent = launchPolicy(answers, state, S);
+      track(c.mint, { stage: intent.intent === 'enter' ? 'picked' : 'judged', detail: intent.why.join(', ') });
       log.decision({ bot: 'launch', mode, lead_id: c.lead_id, market: c.mint, state, answers, model_version: res.response.model_version, latency_ms: res.latency_ms, policy: intent, display: c._display });
       const t = now();
       outcomeQueue.push({ lead_id: c.lead_id, mint: c.mint, curveKey: c.bonding_curve, price0: c.price_sol, answers, momentumAt: t + cfg.solana.outcomes.momentum_horizon_ms, rugAt: t + cfg.solana.outcomes.rug_horizon_ms, minPrice: c.price_sol, done: {} });
@@ -131,11 +142,12 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
   });
 
   async function scan() {
+    const t = now();
+    const why = risk.halted ? 'desk halted' : book.open ? 'not checked: a position was open' : 'not checked in time';
+    for (const l of [...pending.values()]) if ((t - l.received_at) / 1000 > S.max_age_s) { pending.delete(l.mint); stats.expired++; track(l.mint, { stage: 'expired', detail: why }); } // never replayed as new
     if (risk.halted) return;
     if (!book.canScan) return; // one position at a time: no scan while one is open
     sol = await getSolUsd();
-    const t = now();
-    for (const l of [...pending.values()]) if ((t - l.received_at) / 1000 > S.max_age_s) { pending.delete(l.mint); stats.expired++; } // never replayed as new
     // Newest-first among those old enough: a launch close to max age is about to expire anyway.
     const batch = [...pending.values()].filter((l) => (t - l.received_at) / 1000 >= S.min_age_s).sort((a, b) => b.received_at - a.received_at).slice(0, S.max_enrich_per_cycle);
     for (const l of batch) pending.delete(l.mint);
@@ -157,6 +169,7 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
     const res = await broker.place(req);
     if (res.status !== 'filled') { log.event({ bot: 'launch', type: 'entry_rejected', lead_id: pick.lead_id, reason: res.reason }); return; }
     stats.entries++;
+    track(pick.mint, { stage: 'bought', detail: `paper buy $${order.notional_usd}` });
     book.claim({ lead_id: pick.lead_id, bot: 'launch', market: pick.mint, curveKey: pick.bonding_curve, entry_price_sol: res.fill_price_sol, opened_ms: now(), display: pick._display, pessExitFailures: 0 });
     // Pessimistic ledger: the same decision, filled after a delay on a re-read curve.
     await sleep(PS.entry_delay_ms);
@@ -211,6 +224,7 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
       }
     }
     stats.exits++;
+    track(p.market, { stage: 'sold', detail: `${p.exitReason ?? reason ?? 'exit'}` });
     book.release(p.lead_id, 'EXIT');
   }
 
@@ -263,6 +277,7 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
         return { floating_usd: pp?.tokens && mark ? pp.tokens * mark * sol.price - costUsd : 0, exposure_usd: costUsd, open_risk_usd: (costUsd * S.stop_bps) / 1e4,
           limits: { daily_loss_limit_usd: riskCfg.risk.daily_loss_limit_usd, max_position_usd_total: riskCfg.risk.max_position_usd_total } };
       })(),
+      recent_launches: [...recent.values()].reverse().slice(0, 40),
       open: o ? [{ bot: 'launch', lead_id: o.lead_id, market: o.market, symbol: o.display?.symbol ?? null, side: 'buy', entry_price_sol: o.entry_price_sol, held_s: Math.round((now() - o.opened_ms) / 1000) }] : [], ...extra });
   }
 
