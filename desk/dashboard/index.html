@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MemeScout desk</title>
+<style>
+.viz-root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface-1: #fcfcfb; --text-primary: #0b0b0b; --text-secondary: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --up: #006300;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface-1: #1a1a19; --text-primary: #f0efec; --text-secondary: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --up: #0ca30c;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.viz-root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--page); color: var(--text-primary); min-height: 100vh; padding: 20px 24px 48px; font-size: 14px; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+h2 { font-size: 14px; margin: 0 0 10px; font-weight: 600; }
+.badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); }
+.sub { color: var(--text-secondary); margin: 0 0 16px; }
+.filters { display: flex; gap: 10px; align-items: center; margin: 12px 0 18px; flex-wrap: wrap; }
+.filters label { color: var(--text-secondary); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+select, button { font: inherit; background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; }
+button { cursor: pointer; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+.span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-6 { grid-column: span 6; } .span-4 { grid-column: span 4; }
+@media (max-width: 1000px) { .span-8, .span-6, .span-4 { grid-column: span 12; } }
+.kpis { display: grid; grid-template-columns: 1.6fr repeat(4, 1fr); gap: 14px; }
+@media (max-width: 1000px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+.kpi .label { color: var(--text-secondary); font-size: 12px; }
+.kpi .value { font-size: 26px; font-weight: 650; margin-top: 4px; }
+.kpi.hero .value { font-size: 48px; line-height: 1.05; }
+.kpi .note { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.pos { color: var(--up); } .neg { color: var(--critical); }
+.runners { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-bottom: 14px; }
+.runner .row { display: flex; justify-content: space-between; gap: 8px; color: var(--text-secondary); font-size: 13px; padding: 2px 0; }
+.runner .row b { color: var(--text-primary); font-weight: 550; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+.status .dot { width: 10px; height: 10px; border-radius: 50%; }
+.warnline { margin-top: 8px; font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: flex-start; }
+.warnline .icon { color: var(--warning); font-weight: 700; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th { text-align: left; color: var(--muted); font-weight: 550; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.scroll { max-height: 360px; overflow: auto; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.muted { color: var(--muted); }
+.chip { display: inline-block; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--border); font-size: 11.5px; white-space: nowrap; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+.legend i.box { width: 10px; height: 10px; border-radius: 2px; }
+svg text { fill: var(--muted); font-size: 11px; }
+.tooltip { position: fixed; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.12); z-index: 10; display: none; min-width: 140px; }
+.tooltip .t { color: var(--muted); margin-bottom: 4px; }
+.tooltip .r { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tooltip .r strong { color: var(--text-primary); }
+.tooltip .r span { color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+.tooltip .r i { width: 12px; height: 2px; display: inline-block; }
+.empty { color: var(--muted); padding: 24px 0; text-align: center; }
+.loading { opacity: .55; transition: opacity .2s; }
+details summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; margin-top: 8px; }
+.cal { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.cal .q { font-size: 12px; font-weight: 600; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal .m { font-size: 11.5px; color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<div class="viz-root" id="root">
+  <header>
+    <h1>MemeScout desk</h1>
+    <span class="badge">PAPER ONLY</span>
+    <span class="muted" id="updated">loading…</span>
+  </header>
+  <p class="sub">Code calculates · judge answers · risk engine vetoes · paper broker fills. Nothing on this page can place an order.</p>
+
+  <div class="filters">
+    <label>Day <select id="day"></select></label>
+    <label>Bot
+      <select id="bot">
+        <option value="all">All bots</option><option value="gambler">Gambler</option><option value="house">House</option>
+        <option value="spy">Spy (synthetic)</option><option value="launch">Spy · Solana launches</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="auto" checked> Auto-refresh 5s</label>
+    <button id="refresh">Refresh</button>
+  </div>
+
+  <div id="body">
+    <div class="runners" id="runners"></div>
+    <div class="kpis" id="kpis"></div>
+    <div class="grid" style="margin-top:14px">
+      <div class="card span-8"><h2>Paper PnL after fees (cumulative, USD)</h2><div class="legend" id="pnlLegend"></div><div id="pnlChart"></div>
+        <details><summary>View as table</summary><div class="scroll" id="pnlTable"></div></details></div>
+      <div class="card span-4"><h2>Open positions</h2><div id="positions"></div></div>
+      <div class="card span-8"><h2>Decisions per minute</h2><div class="legend" id="dpmLegend"></div><div id="dpmChart"></div>
+        <details><summary>View as table</summary><div class="scroll" id="dpmTable"></div></details></div>
+      <div class="card span-4"><h2>Funnel: why candidates were rejected</h2><div id="rejChart"></div></div>
+      <div class="card span-6"><h2>Risk engine vetoes</h2><div id="vetoes"></div></div>
+      <div class="card span-6"><h2>Policy outcomes</h2><div id="intents"></div></div>
+      <div class="card span-12"><h2>Recent decisions</h2><div class="scroll" id="decisions"></div></div>
+      <div class="card span-6"><h2>Recent paper trades</h2><div class="scroll" id="trades"></div></div>
+      <div class="card span-6"><h2>Events &amp; alerts</h2><div class="scroll" id="events"></div></div>
+      <div class="card span-12"><h2>Calibration: does a 0.8 come true 80% of the time?</h2>
+        <p class="sub" style="margin:0 0 10px">Dashed line = perfect calibration. Dots = observed hit rate per probability bucket (dot size = sample count).</p>
+        <div class="cal" id="calibration"></div></div>
+    </div>
+  </div>
+  <div class="tooltip" id="tip"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const SVGNS = 'http://www.w3.org/2000/svg';
+const BOT_COLOR = { gambler: 'var(--series-1)', house: 'var(--series-2)', launch: 'var(--series-3)', spy: 'var(--series-3)' };
+const BOT_NAME = { gambler: 'Gambler', house: 'House', launch: 'Spy · Solana', spy: 'Spy' };
+const token = new URLSearchParams(location.search).get('token');
+let timer = null, first = true;
+
+function el(tag, attrs = {}, ...kids) {
+  const n = tag.startsWith('svg:') ? document.createElementNS(SVGNS, tag.slice(4)) : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) (k === 'class' && !tag.startsWith('svg:')) ? n.className = v : n.setAttribute(k, v);
+  for (const k of kids) n.append(k instanceof Node ? k : document.createTextNode(k ?? ''));
+  return n;
+}
+const fmtUsd = (x) => x == null ? '—' : (x < 0 ? '−$' : '$') + Math.abs(x).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const short = (s, n = 10) => !s ? '—' : s.length > n ? s.slice(0, n) + '…' : s;
+const ago = (t) => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`; };
+
+function tip(e, title, rows) {
+  const t = $('tip'); t.replaceChildren(el('div', { class: 't' }, title));
+  for (const [label, value, color] of rows) {
+    const key = el('span'); if (color) { const i = el('i'); i.style.background = color; key.append(i); } key.append(label);
+    t.append(el('div', { class: 'r' }, key, el('strong', {}, value)));
+  }
+  t.style.display = 'block';
+  const x = Math.min(window.innerWidth - t.offsetWidth - 12, e.clientX + 14), y = Math.min(window.innerHeight - t.offsetHeight - 12, e.clientY + 14);
+  t.style.left = x + 'px'; t.style.top = y + 'px';
+}
+const hideTip = () => { $('tip').style.display = 'none'; };
+
+function table(cols, rows) {
+  if (!rows.length) return el('div', { class: 'empty' }, 'Nothing yet');
+  const t = el('table'), hr = el('tr');
+  for (const c of cols) hr.append(el('th', { class: c.num ? 'num' : null }, c.label));
+  t.append(el('thead', {}, hr));
+  const tb = el('tbody');
+  for (const r of rows) { const tr = el('tr'); for (const c of cols) { const v = c.get(r); tr.append(el('td', { class: [c.num ? 'num' : '', c.cls ?? ''].join(' ') || null }, v instanceof Node ? v : String(v ?? '—'))); } tb.append(tr); }
+  t.append(tb); return t;
+}
+
+function statusOf(s) {
+  const age = (Date.now() - s.ts) / 1000;
+  if (s.halted) return { label: 'Halted: ' + s.halted, color: 'var(--critical)', icon: '■' };
+  if (s.runner === 'solana' && !s.feed_connected && age < 30) return { label: 'Running · feed down', color: 'var(--warning)', icon: '▲' };
+  if (age < 30) return { label: 'Live', color: 'var(--good)', icon: '●' };
+  if (age < 180) return { label: 'Stale', color: 'var(--warning)', icon: '▲' };
+  return { label: 'Not running', color: 'var(--critical)', icon: '■' };
+}
+
+function renderRunners(statuses) {
+  const box = $('runners'); box.replaceChildren();
+  if (!statuses.length) { box.append(el('div', { class: 'card' }, el('div', { class: 'empty' }, 'No runner has reported yet. Start one: npm run paper  or  npm run solana'))); return; }
+  for (const s of statuses) {
+    const st = statusOf(s);
+    const dot = el('span', { class: 'dot' }); dot.style.background = st.color;
+    const card = el('div', { class: 'card runner' },
+      el('div', { class: 'row' }, el('h2', { style: 'margin:0' }, s.runner === 'solana' ? 'Solana launch scanner' : 'Synthetic market desk'), el('span', { class: 'status' }, dot, st.label)),
+      el('div', { class: 'row' }, 'Mode', el('b', {}, s.mode)),
+      el('div', { class: 'row' }, 'Feed', el('b', {}, s.feed)),
+      el('div', { class: 'row' }, 'Judge', el('b', {}, `${s.judge} · pin ${s.model_pin}`)),
+      el('div', { class: 'row' }, 'Last heartbeat', el('b', {}, ago(s.ts))),
+      el('div', { class: 'row' }, 'Realized today', el('b', { class: s.realized_today_usd >= 0 ? 'pos' : 'neg' }, fmtUsd(s.realized_today_usd))),
+      s.runner === 'solana' ? el('div', { class: 'row' }, 'Launches seen / waiting / judged', el('b', {}, `${s.counters.launches_seen} / ${s.pending} / ${s.counters.judged}`)) : el('div', { class: 'row' }, 'Block', el('b', {}, `${s.tick} @ ${s.block_ms}ms`)),
+    );
+    if (s.judge === 'mock judge') card.append(el('div', { class: 'warnline' }, el('span', { class: 'icon' }, '▲'), 'Mock judge: answers are simple rules, not Jev. PnL here proves plumbing, not edge.'));
+    if (s.runner === 'synthetic') card.append(el('div', { class: 'warnline' }, el('span', { class: 'icon' }, '▲'), 'Prices are generated, not a real market.'));
+    if (s.runner === 'solana' && (!s.feed_connected || !s.feed_last_message_at || Date.now() - s.feed_last_message_at > 90000)) card.append(el('div', { class: 'warnline' }, el('span', { class: 'icon', style: 'color:var(--critical)' }, '■'), s.feed_connected ? 'Feed connected but no launches in 90s.' : 'Launch feed NOT connected: check outbound network to pumpportal.fun.'));
+    if (s.sol_usd?.source === 'config_fallback') card.append(el('div', { class: 'warnline' }, el('span', { class: 'icon' }, '▲'), 'SOL price unavailable; using config fallback.'));
+    box.append(card);
+  }
+}
+
+function renderKpis(k) {
+  const box = $('kpis'); box.replaceChildren();
+  const tile = (label, value, note, cls, hero) => el('div', { class: 'card kpi' + (hero ? ' hero' : '') }, el('div', { class: 'label' }, label), el('div', { class: 'value ' + (cls ?? '') }, value), note ? el('div', { class: 'note' }, note) : '');
+  box.append(
+    tile('Paper PnL after fees', fmtUsd(k.pnl_usd), `fees paid ${fmtUsd(k.fees_usd)}`, k.pnl_usd > 0 ? 'pos' : k.pnl_usd < 0 ? 'neg' : '', true),
+    tile('Decisions', k.decisions.toLocaleString(), `${k.fallbacks} fell back (held / halted)`),
+    tile('Paper fills', k.fills.toLocaleString()),
+    tile('Risk vetoes · funnel rejections', `${k.vetoes} · ${k.rejections}`),
+    tile('Judge latency', k.latency_p50 == null ? '—' : `${k.latency_p50} ms`, k.latency_p95 == null ? '' : `p95 ${k.latency_p95} ms · ${k.alerts} alerts`),
+  );
+}
+
+function axisTicks(min, max, n = 4) {
+  if (min === max) { min -= 1; max += 1; }
+  const step = Math.pow(10, Math.floor(Math.log10((max - min) / n))); const err = (max - min) / n / step;
+  const s = step * (err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1);
+  const ticks = []; for (let v = Math.floor(min / s) * s; v <= max + s * 0.5; v += s) ticks.push(+v.toFixed(10));
+  return ticks;
+}
+
+function lineChart(host, seriesMap, { height = 240, yFmt = fmtUsd } = {}) {
+  host.replaceChildren();
+  const series = Object.entries(seriesMap).filter(([, pts]) => pts.length);
+  if (!series.length) { host.append(el('div', { class: 'empty' }, 'No closed paper trades yet')); return; }
+  const W = host.clientWidth || 700, H = height, L = 64, R = 96, T = 10, B = 26;
+  const xs = series.flatMap(([, p]) => p.map((d) => d[0])), ys = series.flatMap(([, p]) => p.map((d) => d[1])).concat([0]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs, x0 + 1);
+  const ticks = axisTicks(Math.min(...ys), Math.max(...ys)); const y0 = ticks[0], y1 = ticks.at(-1);
+  const X = (t) => L + ((t - x0) / (x1 - x0)) * (W - L - R), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+  const svg = el('svg:svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Cumulative paper PnL by bot' });
+  for (const v of ticks) {
+    svg.append(el('svg:line', { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: v === 0 ? 'var(--axis)' : 'var(--grid)', 'stroke-width': 1 }));
+    svg.append(el('svg:text', { x: L - 8, y: Y(v) + 4, 'text-anchor': 'end' }, yFmt(v)));
+  }
+  for (let i = 0; i <= 4; i++) { const t = x0 + ((x1 - x0) * i) / 4; svg.append(el('svg:text', { x: X(t), y: H - 6, 'text-anchor': i === 0 ? 'start' : i === 4 ? 'end' : 'middle' }, new Date(t).toLocaleTimeString([], x1 - x0 < 600000 ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' }))); }
+  const ends = [];
+  for (const [bot, pts] of series) {
+    const all = [[x0, 0], ...pts];
+    let d = ''; all.forEach(([t, v], i) => { d += (i ? `H${X(t).toFixed(1)}V${Y(v).toFixed(1)}` : `M${X(t).toFixed(1)},${Y(v).toFixed(1)}`); }); // step: PnL changes at fills
+    svg.append(el('svg:path', { d, fill: 'none', stroke: BOT_COLOR[bot], 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+    ends.push({ bot, y: Y(pts.at(-1)[1]), v: pts.at(-1)[1] });
+  }
+  ends.sort((a, b) => a.y - b.y); for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 14);
+  for (const e of ends) svg.append(el('svg:text', { x: W - R + 8, y: e.y + 4, style: 'fill:var(--text-secondary)' }, `${BOT_NAME[e.bot]} ${yFmt(e.v)}`));
+  const cross = el('svg:line', { y1: T, y2: H - B, stroke: 'var(--axis)', 'stroke-width': 1, visibility: 'hidden' });
+  svg.append(cross);
+  const hit = el('svg:rect', { x: L, y: T, width: W - L - R, height: H - T - B, fill: 'transparent' });
+  hit.addEventListener('pointermove', (e) => {
+    const r = svg.getBoundingClientRect(); const t = x0 + ((e.clientX - r.left - L) / (W - L - R)) * (x1 - x0);
+    cross.setAttribute('x1', X(t)); cross.setAttribute('x2', X(t)); cross.setAttribute('visibility', 'visible');
+    tip(e, new Date(t).toLocaleTimeString(), series.map(([bot, pts]) => { let v = 0; for (const [pt, pv] of pts) if (pt <= t) v = pv; return [BOT_NAME[bot], yFmt(v), BOT_COLOR[bot]]; }));
+  });
+  hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); hideTip(); });
+  svg.append(hit); host.append(svg);
+}
+
+function stackedBars(host, rows, keys, { height = 200 } = {}) {
+  host.replaceChildren();
+  if (!rows.length) { host.append(el('div', { class: 'empty' }, 'No decisions yet')); return; }
+  const W = host.clientWidth || 700, H = height, L = 40, R = 8, T = 8, B = 24;
+  const max = Math.max(1, ...rows.map((r) => keys.reduce((s, k) => s + r[k.key], 0)));
+  const ticks = axisTicks(0, max, 3); const top = ticks.at(-1);
+  const bw = Math.max(2, (W - L - R) / rows.length - 2);
+  const Y = (v) => T + (1 - v / top) * (H - T - B);
+  const svg = el('svg:svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Decisions per minute' });
+  for (const v of ticks) { svg.append(el('svg:line', { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: v === 0 ? 'var(--axis)' : 'var(--grid)' })); svg.append(el('svg:text', { x: L - 6, y: Y(v) + 4, 'text-anchor': 'end' }, String(v))); }
+  rows.forEach((r, i) => {
+    const x = L + i * (bw + 2); let acc = 0;
+    const g = el('svg:g');
+    keys.forEach((k, j) => {
+      const v = r[k.key]; if (!v) return;
+      const y1 = Y(acc), y2 = Y(acc + v); acc += v;
+      const h = Math.max(0, y1 - y2 - (acc < top ? 2 : 0) );
+      const isTop = keys.slice(j + 1).every((kk) => !r[kk.key]);
+      g.append(el('svg:rect', { x, y: y2, width: bw, height: Math.max(1, h), fill: k.color, rx: isTop ? Math.min(4, bw / 2) : 0 }));
+    });
+    const hit = el('svg:rect', { x: x - 1, y: T, width: bw + 2, height: H - T - B, fill: 'transparent' });
+    hit.addEventListener('pointermove', (e) => tip(e, new Date(r.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), keys.map((k) => [k.label, String(r[k.key]), k.color])));
+    hit.addEventListener('pointerleave', hideTip);
+    g.append(hit); svg.append(g);
+  });
+  [0, rows.length - 1].forEach((i, n) => svg.append(el('svg:text', { x: L + i * (bw + 2) + (n ? bw : 0), y: H - 6, 'text-anchor': n ? 'end' : 'start' }, new Date(rows[i].t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))));
+  host.append(svg);
+}
+
+function hBars(host, pairs, { color = 'var(--series-1)', empty = 'Nothing rejected yet' } = {}) {
+  host.replaceChildren();
+  if (!pairs.length) { host.append(el('div', { class: 'empty' }, empty)); return; }
+  const W = host.clientWidth || 360, rowH = 22, labelW = 150, H = pairs.length * rowH + 4;
+  const max = Math.max(...pairs.map((p) => p[1]));
+  const svg = el('svg:svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Rejections by check' });
+  pairs.forEach(([label, v], i) => {
+    const y = i * rowH + 3, w = Math.max(2, ((W - labelW - 44) * v) / max);
+    svg.append(el('svg:text', { x: labelW - 8, y: y + 12, 'text-anchor': 'end', style: 'fill:var(--text-secondary)' }, label.replaceAll('_', ' ')));
+    const bar = el('svg:rect', { x: labelW, y, width: w, height: rowH - 8, rx: 3, fill: color });
+    bar.addEventListener('pointermove', (e) => tip(e, label, [['count', String(v), color]])); bar.addEventListener('pointerleave', hideTip);
+    svg.append(bar, el('svg:text', { x: labelW + w + 6, y: y + 12, style: 'fill:var(--text-primary)' }, String(v)));
+  });
+  host.append(svg);
+}
+
+function reliability(q) {
+  const S = 170, P = 18, I = S - 2 * P;
+  const svg = el('svg:svg', { width: S, height: S, viewBox: `0 0 ${S} ${S}`, role: 'img', 'aria-label': 'Reliability for ' + q.question });
+  svg.append(el('svg:rect', { x: P, y: P, width: I, height: I, fill: 'none', stroke: 'var(--grid)' }));
+  svg.append(el('svg:line', { x1: P, y1: P + I, x2: P + I, y2: P, stroke: 'var(--axis)', 'stroke-dasharray': '4 4' }));
+  const maxC = Math.max(1, ...q.buckets.map((b) => b.count));
+  for (const b of q.buckets) {
+    if (!b.count) continue;
+    const cx = P + b.mean_p * I, cy = P + (1 - b.hit_rate) * I;
+    const dot = el('svg:circle', { cx, cy, r: 4 + 4 * Math.sqrt(b.count / maxC), fill: 'var(--series-1)', stroke: 'var(--surface-1)', 'stroke-width': 2 });
+    dot.addEventListener('pointermove', (e) => tip(e, q.question, [['said', b.mean_p.toFixed(2)], ['happened', b.hit_rate.toFixed(2)], ['samples', String(b.count)]]));
+    dot.addEventListener('pointerleave', hideTip);
+    svg.append(dot);
+  }
+  svg.append(el('svg:text', { x: P, y: S - 4 }, '0'), el('svg:text', { x: P + I, y: S - 4, 'text-anchor': 'end' }, 'said 1.0'));
+  return svg;
+}
+
+function legend(host, items, box) {
+  host.replaceChildren(...items.map(([label, color]) => { const i = el('i', { class: box ? 'box' : null }); i.style.background = color; return el('span', {}, i, label); }));
+}
+
+function render(d) {
+  $('updated').textContent = `updated ${fmtTime(d.generated_at)}`;
+  const daySel = $('day'); const cur = daySel.value || d.day;
+  daySel.replaceChildren(...(d.days.length ? d.days : [d.day]).map((x) => el('option', { value: x }, x))); daySel.value = cur;
+
+  renderRunners(d.statuses);
+  renderKpis(d.kpis);
+
+  const bots = Object.keys(d.pnl);
+  legend($('pnlLegend'), bots.map((b) => [BOT_NAME[b] ?? b, BOT_COLOR[b]]));
+  if (bots.length < 2) $('pnlLegend').replaceChildren();
+  lineChart($('pnlChart'), d.pnl);
+  $('pnlTable').replaceChildren(table([{ label: 'time', get: (r) => fmtTime(r[1]) }, { label: 'bot', get: (r) => BOT_NAME[r[0]] }, { label: 'cumulative', num: true, get: (r) => fmtUsd(r[2]) }],
+    Object.entries(d.pnl).flatMap(([b, pts]) => pts.map(([t, v]) => [b, t, v])).sort((a, b) => b[1] - a[1]).slice(0, 200)));
+
+  const keys = [{ key: 'act', label: 'Acted (enter / quote)', color: 'var(--series-1)' }, { key: 'hold', label: 'Held / skipped', color: 'var(--series-2)' }, { key: 'fallback', label: 'Fallback', color: 'var(--series-3)' }];
+  legend($('dpmLegend'), keys.map((k) => [k.label, k.color]), true);
+  stackedBars($('dpmChart'), d.decisions_per_min, keys);
+  $('dpmTable').replaceChildren(table([{ label: 'minute', get: (r) => fmtTime(r.t) }, ...keys.map((k) => ({ label: k.label, num: true, get: (r) => r[k.key] }))], [...d.decisions_per_min].reverse()));
+
+  hBars($('rejChart'), d.rejections_by_check);
+  $('vetoes').replaceChildren(d.vetoes_by_rule.length ? table([{ label: 'rule', get: (r) => r[0] }, { label: 'times fired', num: true, get: (r) => r[1] }], d.vetoes_by_rule) : el('div', { class: 'empty' }, 'No vetoes fired'));
+  $('intents').replaceChildren(table([{ label: 'bot · intent', get: (r) => r[0] }, { label: 'count', num: true, get: (r) => r[1] }], d.intents));
+
+  const open = d.statuses.flatMap((s) => s.open ?? []);
+  $('positions').replaceChildren(open.length ? table([
+    { label: 'bot', get: (r) => BOT_NAME[r.bot] ?? r.bot },
+    { label: 'market', cls: 'mono', get: (r) => r.symbol ? `${r.symbol} ${short(r.market, 8)}` : short(r.market, 14) },
+    { label: 'side', get: (r) => r.side + (r.note ? ` (${r.note})` : '') },
+    { label: 'detail', get: (r) => r.resting_orders != null ? `${r.resting_orders} resting` : r.held_s != null ? `held ${r.held_s}s` : r.entry ? `entry ${r.entry.toFixed(4)} · mark ${r.mark.toFixed(4)}` : '' },
+  ], open) : el('div', { class: 'empty' }, 'Flat. No open positions'));
+
+  $('decisions').replaceChildren(table([
+    { label: 'time', get: (r) => fmtTime(r.ts) },
+    { label: 'bot', get: (r) => BOT_NAME[r.bot] ?? r.bot },
+    { label: 'market', cls: 'mono', get: (r) => r.symbol ? `${r.symbol} ${short(r.market, 6)}` : short(r.market ?? r.lead_id, 12) },
+    { label: 'decision', get: (r) => el('span', { class: 'chip' }, r.intent) },
+    { label: 'why', get: (r) => r.why },
+    { label: 'judge answers', cls: 'mono', get: (r) => r.answers ? Object.entries(r.answers).map(([k, v]) => `${k}=${v}`).join('  ') : '—' },
+    { label: 'ms', num: true, get: (r) => r.latency_ms },
+  ], d.recent_decisions));
+
+  $('trades').replaceChildren(table([
+    { label: 'time', get: (r) => fmtTime(r.ts) },
+    { label: 'bot', get: (r) => BOT_NAME[r.bot] ?? r.bot },
+    { label: 'market', cls: 'mono', get: (r) => short(r.market, 12) },
+    { label: 'side', get: (r) => r.side },
+    { label: 'status', get: (r) => r.status },
+    { label: 'size', num: true, get: (r) => r.notional_usd == null ? '—' : fmtUsd(r.notional_usd) },
+    { label: 'realized', num: true, get: (r) => { const v = r.realized_usd; return v == null ? '—' : el('span', { class: v > 0 ? 'pos' : v < 0 ? 'neg' : '' }, fmtUsd(v)); } },
+  ], d.recent_trades));
+
+  $('events').replaceChildren(table([
+    { label: 'time', get: (r) => fmtTime(r.ts) },
+    { label: 'type', get: (r) => r.type === 'alert' ? el('span', { class: 'status', style: 'color:var(--critical)' }, '■ alert') : r.type },
+    { label: 'detail', get: (r) => r.msg ?? r.reason ?? r.kind ?? (r.lead_id ? `${r.lead_id}${r.realized_usd != null ? ' · ' + fmtUsd(r.realized_usd) : ''}` : '') },
+  ], d.recent_events));
+
+  const cal = $('calibration'); cal.replaceChildren();
+  if (!d.calibration.length) cal.append(el('div', { class: 'empty' }, 'Not enough resolved outcomes yet (needs 5+ per question)'));
+  for (const q of d.calibration) cal.append(el('div', {}, el('div', { class: 'q', title: q.question }, q.question), el('div', { class: 'm' }, `n=${q.n} · Brier ${q.brier.toFixed(3)} · gap ${q.ece.toFixed(3)}`), reliability(q)));
+}
+
+async function load() {
+  const body = $('body'); if (!first) body.classList.add('loading');
+  const qs = new URLSearchParams({ bot: $('bot').value }); if ($('day').value) qs.set('day', $('day').value); if (token) qs.set('token', token);
+  try {
+    const r = await fetch('/api/summary?' + qs);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    render(await r.json()); first = false;
+  } catch (e) { $('updated').textContent = 'dashboard API unreachable (' + e.message + ')'; }
+  finally { body.classList.remove('loading'); }
+}
+function schedule() { clearInterval(timer); if ($('auto').checked) timer = setInterval(load, 5000); }
+$('refresh').addEventListener('click', load);
+$('bot').addEventListener('change', load);
+$('day').addEventListener('change', load);
+$('auto').addEventListener('change', schedule);
+window.addEventListener('resize', () => { clearTimeout(window._rz); window._rz = setTimeout(load, 200); });
+load(); schedule();
+</script>
+</body>
+</html>

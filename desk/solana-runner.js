@@ -195,7 +195,13 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
     }
   }
 
-  return { onLaunch, scan, manageExit, resolveOutcomes, stats, risk, book, pending, broker };
+  function writeStatus(extra = {}) {
+    const o = book.open;
+    log.status('solana', { runner: 'solana', mode, feed: 'PumpPortal new tokens + Solana RPC', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, sol_usd: sol, pending: pending.size, counters: stats,
+      open: o ? [{ bot: 'launch', lead_id: o.lead_id, market: o.market, symbol: o.display?.symbol ?? null, side: 'buy', entry_price_sol: o.entry_price_sol, held_s: Math.round((now() - o.opened_ms) / 1000) }] : [], ...extra });
+  }
+
+  return { onLaunch, scan, manageExit, resolveOutcomes, writeStatus, stats, risk, book, pending, broker };
 }
 
 // ---------------------------------------------------------------- entrypoint
@@ -215,6 +221,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   const loop = async (fn, ms, name) => { while (!stopping) { const t = Date.now(); try { await fn(); } catch (e) { console.log(`${name} error: ${e.message}`); } const end = Date.now() + Math.max(250, ms - (Date.now() - t)); while (!stopping && Date.now() < end) await new Promise((r) => setTimeout(r, Math.min(500, end - Date.now()))); } };
   const heartbeat = async () => {
+    desk.writeStatus({ feed_connected: feed.connected, feed_last_message_at: feed.lastMessageAt });
     const s = desk.stats, o = desk.book.open;
     console.log(new Date().toISOString(), JSON.stringify({ seen: s.launches_seen, pending: desk.pending.size, scanned: s.scanned, judged: s.judged, entries: s.entries, exits: s.exits, pnl_usd: +s.realized_usd.toFixed(2), open: o ? `${o.display?.symbol ?? ''} ${o.market.slice(0, 6)}…` : null, halted: desk.risk.halted, top_rejections: Object.entries(s.rejections).sort((a, b) => b[1] - a[1]).slice(0, 4) }));
   };
@@ -222,6 +229,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     loop(desk.scan, cfg.solana.scan_interval_ms, 'scan'),
     loop(desk.manageExit, cfg.solana.exit_poll_ms, 'exit'),
     loop(desk.resolveOutcomes, 15000, 'outcomes'),
-    loop(heartbeat, 60000, 'heartbeat'),
+    loop(heartbeat, 10000, 'heartbeat'),
   ]);
 }

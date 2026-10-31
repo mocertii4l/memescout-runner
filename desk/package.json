@@ -15,6 +15,7 @@
     "report:daily": "node reports/daily.js",
     "test": "node --test test/*.test.js",
     "solana": "DESK_MODE=paper node solana-runner.js",
-    "solana:shadow": "DESK_MODE=shadow node solana-runner.js"
+    "solana:shadow": "DESK_MODE=shadow node solana-runner.js",
+    "dashboard": "node dashboard/server.js"
   }
 }

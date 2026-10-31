@@ -17,7 +17,7 @@ feed → state/ (code: mid, spread, imbalance, vol, returns, inventory, drawdown
 
 ```bash
 cd desk
-npm test                                   # 24 tests
+npm test                                   # 26 tests
 DESK_TICKS=500 npm run shadow              # Jev labels everything, nothing executes
 DESK_TICKS=500 npm run paper               # policy executes against the paper broker
 npm run report:daily                       # decisions, trades, PnL after fees, vetoes, fallbacks
@@ -35,6 +35,22 @@ JUDGE_URL=http://127.0.0.1:8787 npm run shadow
 ```
 
 Test the link from the bot's own host, not your laptop.
+
+## Dashboard
+
+```bash
+npm run dashboard        # http://127.0.0.1:8080, refreshes every 5 s
+```
+
+Run it alongside `npm run paper` and/or `npm run solana`. It reads the logs and never writes or trades. It shows:
+- runner health: live / stale / down, feed connected, mock vs real judge
+- paper PnL after fees by bot, plus decisions per minute
+- open positions, the funnel's rejection reasons, risk vetoes, recent decisions with every judge answer, trades, events
+- calibration charts per question
+
+Each chart has a table view, and the page follows the system light/dark setting. It binds to localhost. To expose it (e.g. as a Render web service), set `DASHBOARD_HOST=0.0.0.0` and a `DASHBOARD_TOKEN` of 24+ characters, then open `/?token=…`.
+
+![dashboard](dashboard/screenshot-light.png)
 
 ## Live Solana launches (Spy, paper)
 

@@ -1,11 +1,12 @@
 // Append-only JSONL logs: every snapshot, every question, every answer and every outcome.
 // Secrets never reach a log: values under sensitive-looking keys are redacted before writing.
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_DIR = fileURLToPath(new URL('./data/', import.meta.url));
-const SENSITIVE = /(key|secret|token|password|authorization|private)/i;
+// Matches api_key, deskSecret, access_token, password… but not market fields like token_flags or tokens.
+const SENSITIVE = /(key$|_key|secret|_token$|^token$|access_token|password|authorization|private)/i;
 
 export function redact(value) {
   if (Array.isArray(value)) return value.map(redact);
@@ -32,5 +33,11 @@ export function createLogger({ dir = process.env.DESK_LOG_DIR || DEFAULT_DIR, no
     veto: (r) => write('vetoes', r),
     rejection: (r) => write('rejections', r), // funnel: every no, with the check that fired
     event: (r) => write('events', r), // fallback ladder, halts, mode changes
+    /** Live status snapshot for the dashboard: overwritten atomically, not appended. */
+    status(name, obj) {
+      const file = join(dir, `status-${name}.json`);
+      writeFileSync(file + '.tmp', JSON.stringify(redact({ ts: now(), ...obj })));
+      renameSync(file + '.tmp', file);
+    },
   };
 }

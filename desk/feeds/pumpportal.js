@@ -24,19 +24,20 @@ export function parseCreateEvent(m, receivedAt = Date.now()) {
 
 export function connectPumpPortal({ onLaunch, onStatus = () => {}, url = URL_DEFAULT, apiKey = process.env.PUMPPORTAL_API_KEY, WebSocketImpl = globalThis.WebSocket } = {}) {
   if (!WebSocketImpl) throw new Error('WebSocket not available (Node ≥22 required)');
-  let socket, stopping = false, backoff = 1000, lastMessage = Date.now();
+  let socket, stopping = false, backoff = 1000, lastMessage = Date.now(), connected = false, everMessage = null;
   function connect() {
     if (stopping) return;
     const u = new URL(url);
     if (apiKey) u.searchParams.set('api-key', apiKey);
     socket = new WebSocketImpl(u);
-    socket.addEventListener('open', () => { backoff = 1000; lastMessage = Date.now(); socket.send(JSON.stringify({ method: 'subscribeNewToken' })); onStatus({ type: 'feed_connected' }); });
+    socket.addEventListener('open', () => { connected = true; backoff = 1000; lastMessage = Date.now(); socket.send(JSON.stringify({ method: 'subscribeNewToken' })); onStatus({ type: 'feed_connected' }); });
     socket.addEventListener('message', (ev) => {
-      lastMessage = Date.now();
+      lastMessage = Date.now(); everMessage = lastMessage;
       try { const l = parseCreateEvent(JSON.parse(ev.data)); if (l) onLaunch(l); } catch { /* ignore non-JSON */ }
     });
     socket.addEventListener('error', () => { try { socket.close(); } catch {} });
     socket.addEventListener('close', () => {
+      connected = false;
       onStatus({ type: 'feed_closed', retry_ms: backoff });
       if (!stopping) { setTimeout(connect, backoff + Math.random() * 500); backoff = Math.min(60000, backoff * 2); }
     });
@@ -44,5 +45,5 @@ export function connectPumpPortal({ onLaunch, onStatus = () => {}, url = URL_DEF
   const watchdog = setInterval(() => { if (Date.now() - lastMessage > 90000) { onStatus({ type: 'feed_stale' }); try { socket?.close(); } catch {} } }, 10000);
   watchdog.unref?.();
   connect();
-  return { stop() { stopping = true; clearInterval(watchdog); try { socket?.close(); } catch {} }, get lastMessageAt() { return lastMessage; } };
+  return { stop() { stopping = true; clearInterval(watchdog); try { socket?.close(); } catch {} }, get lastMessageAt() { return everMessage; }, get connected() { return connected; } };
 }

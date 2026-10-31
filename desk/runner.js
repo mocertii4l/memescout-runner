@@ -28,7 +28,7 @@ export function createDesk({ mode = 'shadow', cfg = loadConfig(), judge, logger 
   if (!['shadow', 'paper'].includes(mode)) throw new Error(`unknown mode ${mode}; live is not available in this skeleton`);
   const log = logger;
   const risk = createRiskEngine(cfg, { onVeto: (v) => log.veto(v) });
-  const broker = createPaperBroker({ feeBps: cfg.risk.fee_bps, minFeeUsd: cfg.risk.min_fee_usd, onFill: (f) => log.trade({ mode, ...f }) });
+  const broker = createPaperBroker({ feeBps: cfg.risk.fee_bps, minFeeUsd: cfg.risk.min_fee_usd, onFill: (f) => log.trade({ mode, bot: f.market.startsWith('HOUSE-') ? 'house' : 'gambler', ...f }) });
   // One position at a time per directional bot. While a bot's position is open, that bot's scan doesn't run.
   const books = { gambler: createBook(), spy: createBook() };
   const bench = createBench(cfg.bench_ttl_ms);
@@ -178,7 +178,7 @@ export function createDesk({ mode = 'shadow', cfg = loadConfig(), judge, logger 
       const d = await ask('spy', state, c.lead_id);
       if (!d.ok) return { pass: false, reason: 'judge_unavailable' };
       const intent = policies.spy(d.answers, state, cfg);
-      log.decision({ decision_id: d.decision_id, lead_id: c.lead_id, bot: 'spy', mode, state, answers: d.answers, model_version: d.model_version, latency_ms: d.latency_ms, policy: intent, token: c.id });
+      log.decision({ decision_id: d.decision_id, lead_id: c.lead_id, bot: 'spy', mode, state, answers: d.answers, model_version: d.model_version, latency_ms: d.latency_ms, policy: intent, market: c.id });
       pending.push({ bot: 'spy', decision_id: d.decision_id, resolveAt: tick, state, answers: d.answers, truth: c._truth });
       return { pass: intent.intent === 'enter', reason: (d.answers.rug?.p ?? 1) > cfg.spy.max_rug_prob ? 'jev_rug' : 'jev_not_worth_it', sort_key: (d.answers.wallet_kind?.probs?.skilled ?? 0), intent, decision: d, state };
     },
@@ -199,7 +199,7 @@ export function createDesk({ mode = 'shadow', cfg = loadConfig(), judge, logger 
     const order = { market: pick.id, side: intent.side, notional_usd: intent.notional_usd, type: 'market', leverage: 1, expected_edge_bps: 50 };
     // Spy trades are synthetic tokens; the paper broker has no book for them, so spy stays shadow-only here.
     const v = risk.check(order, { positions: positionsUsd(), model_version: decision.model_version });
-    log.trade({ mode: 'shadow', bot: 'spy', lead_id: pick.lead_id, token: pick.id, order, allowed: v.allowed, vetoes: v.vetoes, age_ms: Date.now() - now });
+    log.trade({ mode: 'shadow', bot: 'spy', lead_id: pick.lead_id, market: pick.id, side: order.side, notional_usd: order.notional_usd, status: v.allowed ? 'shadow' : 'vetoed', order, allowed: v.allowed, vetoes: v.vetoes, age_ms: Date.now() - now });
     if (v.allowed) { counters.would_trade++; book.claim({ lead_id: pick.lead_id, bot: 'spy', market: pick.id, tick }); }
     else counters.vetoes++;
   }
@@ -236,6 +236,16 @@ export function createDesk({ mode = 'shadow', cfg = loadConfig(), judge, logger 
     if (bots.includes('spy') && tick % 25 === 0) jobs.push(spyTick());
     await Promise.all(jobs);
     resolveOutcomes(snap);
+    if (tick % 5 === 0) writeStatus(snap);
+  }
+
+  function writeStatus(snap) {
+    const mid = snap.bars.at(-1).close;
+    const open = [];
+    if (books.gambler.open) open.push({ bot: 'gambler', lead_id: books.gambler.open.lead_id, market: books.gambler.open.market, side: books.gambler.open.side, entry: books.gambler.open.entry, mark: mid, notional_usd: books.gambler.open.notional_usd });
+    if (books.spy.open) open.push({ bot: 'spy', lead_id: books.spy.open.lead_id, market: books.spy.open.market, side: 'buy', note: 'shadow' });
+    if (grid.active) open.push({ bot: 'house', lead_id: 'grid', market: 'HOUSE-' + snap.market, side: 'grid', resting_orders: broker.restingOrders().length, range: grid.range });
+    log.status('desk', { runner: 'synthetic', mode, tick, block_ms: cfg.block_ms, feed: 'synthetic (generated prices)', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, counters, open, mark: mid });
   }
 
   return { step, counters, risk, broker, books, get tick() { return tick; } };
