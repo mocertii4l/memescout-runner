@@ -48,3 +48,5 @@ services:
         value: paper
       - key: DESK_RUN_SYNTHETIC
         value: "0"
+      - key: DESK_LOOSE
+        value: "0"

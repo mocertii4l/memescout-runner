@@ -155,5 +155,26 @@
     "paper_start_usd": 1000,
     "alert_max_loss_pct": 10,
     "alert_drawdown_pct": 10
+  },
+  "solana_profiles": {
+    "_comment": "Extra paper desks that run beside the strict one (enable with --loose or DESK_LOOSE=1). Each is fully independent; its trades are tagged launch_loose and kept out of the account equity. Only thresholds change; scam checks (mint/freeze authority open, graduated curve) are never relaxed.",
+    "loose": {
+      "max_creator_initial_buy_pct": 20,
+      "min_market_cap_usd": 4000,
+      "min_inflow_sol": 1,
+      "max_top10_pct": 50,
+      "max_largest_holder_pct": 15,
+      "max_jev_candidates": 5,
+      "max_enrich_per_cycle": 10,
+      "policy": {
+        "max_rug_prob": 0.4,
+        "min_quality": 1.4,
+        "min_momentum_prob": 0.5,
+        "ok_kinds": [
+          "organic",
+          "bundled"
+        ]
+      }
+    }
   }
 }

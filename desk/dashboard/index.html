@@ -10,7 +10,7 @@
   --bg: #070a10; --card: #0e131c; --card-2: #121925; --line: rgba(255,255,255,0.07); --grid: rgba(255,255,255,0.06); --axis: rgba(255,255,255,0.16);
   --text-primary: #eef0f4; --text-secondary: #b5bcc9; --muted: #8a93a3;
   --gold: #d6a84e;
-  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
   --up: #3fcf8e; --warning: #fab219; --critical: #ef6b6b;
 }
 * { box-sizing: border-box; }
@@ -159,14 +159,14 @@ a.lnk { color: var(--gold); text-decoration: none; font-size: 11.5px; } a.lnk:ho
     <label>Bot
       <select id="bot">
         <option value="all">All bots</option><option value="gambler">Gambler</option><option value="house">House</option>
-        <option value="spy">Spy (synthetic)</option><option value="launch">Solana launches</option>
+        <option value="spy">Spy (synthetic)</option><option value="launch">Solana launches</option><option value="launch_loose">Solana launches (loose)</option>
       </select>
     </label>
     <label><input type="checkbox" id="auto" checked> Auto-refresh 5s</label>
   </div>
 
   <div id="body" class="grid">
-    <div class="card span-12"><div class="cardhead"><h2>Live launches · Solana</h2><span class="aside">newest first · each launch waits ~45 s, then goes through the funnel</span><span class="right aside mono" id="launchCounts"></span></div>
+    <div class="card span-12"><div class="cardhead"><h2>Live launches · Solana</h2><div class="seg" id="profileSeg" style="display:none"><button data-p="solana" class="on">Strict</button><button data-p="solana-loose">Loose</button></div><span class="aside">newest first · each launch waits ~45 s, then goes through the funnel</span><span class="right aside mono" id="launchCounts"></span></div>
       <div class="scroll" id="launches" style="max-height:420px"></div></div>
     <div class="card span-8"><div class="cardhead"><h2>P/L by bot (cumulative, after fees)</h2></div><div class="legend" id="pnlLegend"></div><div id="pnlChart"></div>
       <details><summary>View as table</summary><div class="scroll" id="pnlTable"></div></details></div>
@@ -190,8 +190,8 @@ a.lnk { color: var(--gold); text-decoration: none; font-size: 11.5px; } a.lnk:ho
 <script>
 const $ = (id) => document.getElementById(id);
 const SVGNS = 'http://www.w3.org/2000/svg';
-const BOT_COLOR = { gambler: 'var(--series-1)', house: 'var(--series-2)', launch: 'var(--series-3)', spy: 'var(--series-3)', 'launch:optimistic': 'var(--series-4)' };
-const BOT_NAME = { gambler: 'Gambler', house: 'House', launch: 'Solana (pessimistic)', spy: 'Spy', 'launch:optimistic': 'Solana (optimistic)' };
+const BOT_COLOR = { gambler: 'var(--series-1)', house: 'var(--series-2)', launch: 'var(--series-3)', spy: 'var(--series-3)', 'launch:optimistic': 'var(--series-4)', launch_loose: 'var(--series-5)' };
+const BOT_NAME = { gambler: 'Gambler', house: 'House', launch: 'Solana (pessimistic)', spy: 'Spy', 'launch:optimistic': 'Solana (optimistic)', launch_loose: 'Solana LOOSE (pessimistic)' };
 const DASHED = (bot) => bot.endsWith(':optimistic');
 let timer = null, first = true, last = null, range = 0;
 
@@ -257,11 +257,11 @@ function svcCard(title, state, big, note, warn) {
 }
 
 function renderStrip(d) {
-  const syn = d.statuses.find((s) => s.runner === 'synthetic'), sol = d.statuses.find((s) => s.runner === 'solana');
+  const syn = d.statuses.find((s) => s.runner === 'synthetic'), sol = d.statuses.find((s) => s.runner === 'solana'), loose = d.statuses.find((s) => s.runner === 'solana-loose');
   const any = d.statuses[0];
   $('strip').replaceChildren(
     svcCard('Solana scanner', runnerState(sol), sol ? `${sol.counters.launches_seen.toLocaleString()} seen` : '—', sol ? `${sol.pending} waiting · ${sol.counters.judged} judged · ${sol.counters.entries} entries` : 'start: npm run solana',
-      sol && !sol.feed_connected ? 'PumpPortal not connected' : null),
+      sol && !sol.feed_connected ? 'PumpPortal not connected' : loose ? `Loose desk also on: ${loose.counters.judged} judged · ${loose.counters.entries} entries · ${fmtSigned(loose.realized_today_usd)} (not in equity)` : null),
     svcCard('Synthetic desk', runnerState(syn), syn ? `block ${syn.tick.toLocaleString()}` : '—', syn ? `${syn.block_ms} ms blocks · generated prices` : 'start: npm run paper'),
     svcCard('Judge', { label: any ? (any.judge === 'mock judge' ? 'MOCK' : 'JEV') : '—', k: any?.judge === 'mock judge' ? 'warn' : 'live' }, d.kpis.latency_p50 == null ? '—' : `${d.kpis.latency_p50} ms`, any ? `p95 ${d.kpis.latency_p95 ?? '—'} ms · pin ${any.model_pin}` : '',
       any?.judge === 'mock judge' ? 'Rules, not Jev: proves plumbing only' : null),
@@ -542,8 +542,12 @@ function render(d) {
 
 const MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const STAGE_ICON = { waiting: '◷', rejected: '✕', expired: '–', judged: '?', picked: '★', bought: '●', sold: '◆' };
+let launchProfile = 'solana';
 function renderLaunches(d) {
-  const sol = d.statuses.find((s) => s.runner === 'solana');
+  const hasLoose = d.statuses.some((s) => s.runner === 'solana-loose');
+  $('profileSeg').style.display = hasLoose ? '' : 'none';
+  if (!hasLoose) launchProfile = 'solana';
+  const sol = d.statuses.find((s) => s.runner === launchProfile);
   const rows = sol?.recent_launches ?? [];
   const by = rows.reduce((m, r) => ((m[r.stage] = (m[r.stage] ?? 0) + 1), m), {});
   $('launchCounts').textContent = rows.length ? Object.entries(by).map(([k, v]) => `${v} ${k}`).join(' · ') : '';
@@ -570,6 +574,7 @@ async function load() {
 }
 function schedule() { clearInterval(timer); if ($('auto').checked) timer = setInterval(load, 5000); }
 $('rangeSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; range = Number(b.dataset.r); for (const x of $('rangeSeg').children) x.classList.toggle('on', x === b); if (last) equityChart($('equityChart'), last.account.equity_curve, last.account.start_usd); });
+$('profileSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; launchProfile = b.dataset.p; for (const x of $('profileSeg').children) x.classList.toggle('on', x === b); if (last) renderLaunches(last); });
 $('bot').addEventListener('change', load);
 $('day').addEventListener('change', load);
 $('auto').addEventListener('change', schedule);

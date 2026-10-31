@@ -27,6 +27,27 @@ import { fetchRealTrades, compareFill } from './feeds/spotcheck.js';
 import { isMain, flag } from './config/main.js';
 
 const TOTAL_SUPPLY = 1_000_000_000;
+
+function mergeDeep(a, b) {
+  if (typeof a !== 'object' || a === null || Array.isArray(a) || typeof b !== 'object' || b === null || Array.isArray(b)) return b ?? a;
+  const out = { ...a };
+  for (const [k, v] of Object.entries(b)) if (!k.startsWith('_')) out[k] = mergeDeep(a[k], v);
+  return out;
+}
+
+/** Share read-only RPC lookups between profiles so running both doesn't double the load. */
+export function createCachedRpc(rpc, { ttlMs = 2500, now = () => Date.now() } = {}) {
+  const cache = new Map();
+  const wrap = (name) => async (key) => {
+    const k = name + ':' + key, hit = cache.get(k);
+    if (hit && now() - hit.at < ttlMs) return hit.value;
+    const value = await rpc[name](key);
+    cache.set(k, { at: now(), value });
+    if (cache.size > 2000) cache.delete(cache.keys().next().value);
+    return value;
+  };
+  return { ...rpc, mintInfo: wrap('mintInfo'), curve: wrap('curve'), largestHolders: wrap('largestHolders') };
+}
 const MIGRATION_RESERVE = 206_900_000; // tokens the curve account keeps for migration
 
 /** Holder stats excluding the bonding curve's own token account. */
@@ -55,21 +76,26 @@ export function buildLaunchState(c, now = Date.now()) {
   };
 }
 
-export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rpc = createRpc(), logger = createLogger(), getSolUsd = () => solUsd({ fallback: cfg.solana.sol_usd_fallback }), now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), rand } = {}) {
+export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: baseCfg = loadConfig(), judge, rpc = createRpc(), logger = createLogger(), getSolUsd = () => solUsd({ fallback: baseCfg.solana.sol_usd_fallback }), now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), rand } = {}) {
+  // Profiles are fully independent desks: own filters, book, bench, risk engine, ledgers and logs tag.
+  // 'loose' only overrides thresholds; the scam checks (mint/freeze authority, graduated curve) are never relaxed.
+  const cfg = profile === 'strict' ? baseCfg : { ...baseCfg, solana: mergeDeep(baseCfg.solana, baseCfg.solana_profiles?.[profile] ?? (() => { throw new Error(`unknown profile ${profile}`); })()) };
   const S = cfg.solana;
+  const BOT = profile === 'strict' ? 'launch' : `launch_${profile}`;
+  const STATUS = profile === 'strict' ? 'solana' : `solana-${profile}`;
   const riskCfg = { ...cfg, risk: { ...cfg.risk, ...S.risk_overrides } };
   const log = logger;
-  const risk = createRiskEngine(riskCfg, { onVeto: (v) => log.veto({ bot: 'launch', ...v }) });
+  const risk = createRiskEngine(riskCfg, { onVeto: (v) => log.veto({ bot: BOT, ...v }) });
   // Two ledgers on every trade: optimistic is the ceiling, pessimistic is closer to a floor.
   // Risk limits and the headline PnL use the pessimistic one.
   const PS = S.pessimistic;
-  const onFill = (f) => { log.trade({ bot: 'launch', mode, ...f }); if (f.ledger === 'optimistic' && f.status === 'filled') spotQueue.push({ ts: now(), at: now() + S.spotcheck.delay_ms, lead_id: f.client_id, mint: f.market, curveKey: f.curve, side: f.side, optimistic_price_sol: f.fill_price_sol }); };
+  const onFill = (f) => { log.trade({ bot: BOT, mode, ...f }); if (f.ledger === 'optimistic' && f.status === 'filled') spotQueue.push({ ts: now(), at: now() + S.spotcheck.delay_ms, lead_id: f.client_id, mint: f.market, curveKey: f.curve, side: f.side, optimistic_price_sol: f.fill_price_sol }); };
   const broker = createCurvePaperBroker({ feeBps: riskCfg.risk.fee_bps, model: 'optimistic', onFill });
   const pessBroker = createCurvePaperBroker({ feeBps: riskCfg.risk.fee_bps, model: 'pessimistic', pess: PS, ...(rand ? { rand } : {}), onFill });
   const spotQueue = [];
   const book = createBook();
   const bench = createBench(cfg.bench_ttl_ms, { now });
-  const decider = createDecider({ judge, deadlineMs: 2000, haltAfter: cfg.risk.consecutive_error_halt, onEvent: (e) => log.event({ bot: 'launch', ...e }) });
+  const decider = createDecider({ judge, deadlineMs: 2000, haltAfter: cfg.risk.consecutive_error_halt, onEvent: (e) => log.event({ bot: BOT, ...e }) });
   const pending = new Map();
   const outcomeQueue = [];
   const stats = { realized_usd_optimistic: 0, pess_entry_failed: 0, pess_exit_failed: 0, written_off: 0, spotchecks: 0, launches_seen: 0, dropped: 0, expired: 0, scanned: 0, judged: 0, entries: 0, exits: 0, vetoes: 0, rejections: {}, realized_usd: 0 };
@@ -88,13 +114,13 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
     stats.launches_seen++;
     track(l.mint, { mint: l.mint, symbol: l._display?.symbol ?? '', name: l._display?.name ?? '', received_at: l.received_at, stage: 'waiting', detail: `checks after ${S.min_age_s}s` });
     if (pending.size >= S.max_pending) { pending.delete(pending.keys().next().value); stats.dropped++; }
-    pending.set(l.mint, { ...l, lead_id: `S-${l.mint.slice(0, 8)}-${l.received_at.toString(36)}` });
+    pending.set(l.mint, { ...l, lead_id: `${profile === 'strict' ? 'S' : 'SL'}-${l.mint.slice(0, 8)}-${l.received_at.toString(36)}` });
   }
 
   const funnel = createFunnel({
     cfg: { ...cfg, funnel: { ...cfg.funnel, max_jev_candidates: S.max_jev_candidates } },
     bench,
-    logRejection: (r) => { stats.rejections[r.check] = (stats.rejections[r.check] ?? 0) + 1; track(r.id, { stage: r.stage === 'jev' ? 'judged' : 'rejected', detail: r.check }); log.rejection({ bot: 'launch', market: r.id, ...r }); },
+    logRejection: (r) => { stats.rejections[r.check] = (stats.rejections[r.check] ?? 0) + 1; track(r.id, { stage: r.stage === 'jev' ? 'judged' : 'rejected', detail: r.check }); log.rejection({ bot: BOT, market: r.id, ...r }); },
     freeCut: (c) => {
       const age = (now() - c.received_at) / 1000;
       if (age > S.max_age_s) return 'stale_signal';
@@ -129,12 +155,12 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
     judgeCandidate: async (c) => {
       const state = leanState(buildLaunchState(c, now()), batteries.launch.reads, cfg.state_token_budget);
       const res = await decider.decide('launch', state);
-      if (!res.ok) { log.decision({ bot: 'launch', mode, lead_id: c.lead_id, market: c.mint, state, fallback: res.fallback, kind: res.kind }); return { pass: false, reason: 'judge_unavailable' }; }
+      if (!res.ok) { log.decision({ bot: BOT, mode, lead_id: c.lead_id, market: c.mint, state, fallback: res.fallback, kind: res.kind }); return { pass: false, reason: 'judge_unavailable' }; }
       stats.judged++;
       const answers = res.response.answers;
       const intent = launchPolicy(answers, state, S);
       track(c.mint, { stage: intent.intent === 'enter' ? 'picked' : 'judged', detail: intent.why.join(', ') });
-      log.decision({ bot: 'launch', mode, lead_id: c.lead_id, market: c.mint, state, answers, model_version: res.response.model_version, latency_ms: res.latency_ms, policy: intent, display: c._display });
+      log.decision({ bot: BOT, mode, lead_id: c.lead_id, market: c.mint, state, answers, model_version: res.response.model_version, latency_ms: res.latency_ms, policy: intent, display: c._display });
       const t = now();
       outcomeQueue.push({ lead_id: c.lead_id, mint: c.mint, curveKey: c.bonding_curve, price0: c.price_sol, answers, momentumAt: t + cfg.solana.outcomes.momentum_horizon_ms, rugAt: t + cfg.solana.outcomes.rug_horizon_ms, minPrice: c.price_sol, done: {} });
       return { pass: intent.intent === 'enter', reason: intent.why.some((w) => w.startsWith('rug')) ? 'jev_rug' : 'jev_not_worth_it', sort_key: answers.quality?.expected ?? 0, intent, model_version: res.response.model_version, answers };
@@ -155,22 +181,22 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
     const cands = batch.map((l) => ({ ...l, creator_initial_buy_pct: l.creator_initial_buy_tokens != null ? (l.creator_initial_buy_tokens / TOTAL_SUPPLY) * 100 : null }));
     stats.scanned += cands.length;
     const { pick, stats: fs } = await funnel.run(cands);
-    log.event({ bot: 'launch', type: 'funnel', stats: fs, sol_usd: sol });
+    log.event({ bot: BOT, type: 'funnel', stats: fs, sol_usd: sol });
     if (!pick) return; // no trade is a result
     const { intent, model_version } = pick.verdict;
     const order = { market: pick.mint, side: 'buy', notional_usd: intent.notional_usd, leverage: 1, expected_edge_bps: intent.expected_edge_bps };
     const v = risk.check(order, { positions: Object.fromEntries(Object.keys(broker.positions()).map((m) => [m, S.ticket_usd])), model_version });
     if (!v.allowed) { stats.vetoes++; return; }
-    if (mode === 'shadow') { log.trade({ bot: 'launch', mode, shadow: true, lead_id: pick.lead_id, market: pick.mint, order }); return; }
+    if (mode === 'shadow') { log.trade({ bot: BOT, mode, shadow: true, lead_id: pick.lead_id, market: pick.mint, order }); return; }
     // Re-read the curve right before the paper fill so the price isn't stale by a whole scan.
     const fresh = await rpc.curve(pick.bonding_curve).catch(() => null);
     broker.onBook(pick.mint, fresh ?? pick.curve);
     const req = { ...order, sol_usd: sol.price, client_id: pick.lead_id, curve: pick.bonding_curve };
     const res = await broker.place(req);
-    if (res.status !== 'filled') { log.event({ bot: 'launch', type: 'entry_rejected', lead_id: pick.lead_id, reason: res.reason }); return; }
+    if (res.status !== 'filled') { log.event({ bot: BOT, type: 'entry_rejected', lead_id: pick.lead_id, reason: res.reason }); return; }
     stats.entries++;
     track(pick.mint, { stage: 'bought', detail: `paper buy $${order.notional_usd}` });
-    book.claim({ lead_id: pick.lead_id, bot: 'launch', market: pick.mint, curveKey: pick.bonding_curve, entry_price_sol: res.fill_price_sol, opened_ms: now(), display: pick._display, pessExitFailures: 0 });
+    book.claim({ lead_id: pick.lead_id, bot: BOT, market: pick.mint, curveKey: pick.bonding_curve, entry_price_sol: res.fill_price_sol, opened_ms: now(), display: pick._display, pessExitFailures: 0 });
     // Pessimistic ledger: the same decision, filled after a delay on a re-read curve.
     await sleep(PS.entry_delay_ms);
     const later = await rpc.curve(pick.bonding_curve).catch(() => null);
@@ -203,7 +229,7 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
       const res = await broker.place(sellReq);
       if (res.status === 'filled') stats.realized_usd_optimistic += res.realized_usd;
       p.optimisticClosed = true; p.exitReason = reason;
-      log.event({ bot: 'launch', type: 'exit', ledger: 'optimistic', lead_id: p.lead_id, market: p.market, reason, realized_usd: res.realized_usd ?? null });
+      log.event({ bot: BOT, type: 'exit', ledger: 'optimistic', lead_id: p.lead_id, market: p.market, reason, realized_usd: res.realized_usd ?? null });
     }
     // Pessimistic ledger exits after a delay, may fail and retry on the next poll, and is written off after N failures.
     if (pessBroker.position(p.market).tokens > 0) {
@@ -216,11 +242,11 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
         if (++p.pessExitFailures < PS.exit_max_failures) return; // book stays open until the pessimistic ledger is out
         const w = pessBroker.writeOff(p.market, sol.price);
         stats.written_off++; risk.recordPnl(w.realized_usd); stats.realized_usd += w.realized_usd;
-        log.event({ bot: 'launch', type: 'exit', ledger: 'pessimistic', lead_id: p.lead_id, market: p.market, reason: 'written_off', realized_usd: w.realized_usd });
+        log.event({ bot: BOT, type: 'exit', ledger: 'pessimistic', lead_id: p.lead_id, market: p.market, reason: 'written_off', realized_usd: w.realized_usd });
       } else if (pres.status === 'filled') {
         risk.recordPnl(pres.realized_usd); stats.realized_usd += pres.realized_usd;
         const sq = spotQueue.find((q) => q.lead_id === sellReq.client_id); if (sq) sq.pessimistic_price_sol = pres.fill_price_sol;
-        log.event({ bot: 'launch', type: 'exit', ledger: 'pessimistic', lead_id: p.lead_id, market: p.market, reason: p.exitReason, realized_usd: pres.realized_usd });
+        log.event({ bot: BOT, type: 'exit', ledger: 'pessimistic', lead_id: p.lead_id, market: p.market, reason: p.exitReason, realized_usd: pres.realized_usd });
       }
     }
     stats.exits++;
@@ -240,8 +266,8 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
         const real = await fetchRealTrades(rpc, { curveKey: q.curveKey, mint: q.mint, ts: q.ts, windowMs: S.spotcheck.window_ms, maxTx: S.spotcheck.max_tx });
         const cmp = compareFill(q, real, S.spotcheck.window_ms);
         stats.spotchecks++;
-        log.spotcheck({ bot: 'launch', lead_id: q.lead_id, market: q.mint, side: q.side, fill_ts: q.ts, optimistic_price_sol: q.optimistic_price_sol, pessimistic_price_sol: q.pessimistic_price_sol ?? null, ...cmp });
-      } catch (e) { log.event({ bot: 'launch', type: 'spotcheck_failed', lead_id: q.lead_id }); }
+        log.spotcheck({ bot: BOT, lead_id: q.lead_id, market: q.mint, side: q.side, fill_ts: q.ts, optimistic_price_sol: q.optimistic_price_sol, pessimistic_price_sol: q.pessimistic_price_sol ?? null, ...cmp });
+      } catch (e) { log.event({ bot: BOT, type: 'spotcheck_failed', lead_id: q.lead_id }); }
     }
   }
 
@@ -255,20 +281,20 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
       if (!curve || o.price0 == null) continue;
       const price = spotPriceSol(curve);
       o.minPrice = Math.min(o.minPrice ?? price, price);
-      if (needMom) { o.done.momentum = true; for (const r of rowsFor('momentum', o.answers.momentum, price > o.price0)) log.outcome({ bot: 'launch', lead_id: o.lead_id, market: o.mint, ...r }); }
-      if (needRug) { o.done.rug = true; for (const r of rowsFor('rug', o.answers.rug, price < o.price0 * (1 - cfg.solana.outcomes.rug_drawdown))) log.outcome({ bot: 'launch', lead_id: o.lead_id, market: o.mint, ...r }); }
+      if (needMom) { o.done.momentum = true; for (const r of rowsFor('momentum', o.answers.momentum, price > o.price0)) log.outcome({ bot: BOT, lead_id: o.lead_id, market: o.mint, ...r }); }
+      if (needRug) { o.done.rug = true; for (const r of rowsFor('rug', o.answers.rug, price < o.price0 * (1 - cfg.solana.outcomes.rug_drawdown))) log.outcome({ bot: BOT, lead_id: o.lead_id, market: o.mint, ...r }); }
     }
     // Resolved, or unresolvable for 10 minutes past its horizon (logged as missing, never guessed).
     for (let i = outcomeQueue.length - 1; i >= 0; i--) {
       const o = outcomeQueue[i];
       if (o.done.momentum && o.done.rug) outcomeQueue.splice(i, 1);
-      else if (t > o.rugAt + 600000) { log.event({ bot: 'launch', type: 'outcome_unresolved', lead_id: o.lead_id }); outcomeQueue.splice(i, 1); }
+      else if (t > o.rugAt + 600000) { log.event({ bot: BOT, type: 'outcome_unresolved', lead_id: o.lead_id }); outcomeQueue.splice(i, 1); }
     }
   }
 
   function writeStatus(extra = {}) {
     const o = book.open;
-    log.status('solana', { runner: 'solana', mode, feed: 'PumpPortal new tokens + Solana RPC', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, realized_optimistic_usd: stats.realized_usd_optimistic, sol_usd: sol, pending: pending.size, counters: stats,
+    log.status(STATUS, { runner: STATUS, profile, mode, feed: 'PumpPortal new tokens + Solana RPC', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, realized_optimistic_usd: stats.realized_usd_optimistic, sol_usd: sol, pending: pending.size, counters: stats,
       ...(() => {
         // Open profit and risk on the pessimistic ledger (the one the headline uses).
         const pp = o ? pessBroker.position(o.market) : null;
@@ -278,10 +304,10 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
           limits: { daily_loss_limit_usd: riskCfg.risk.daily_loss_limit_usd, max_position_usd_total: riskCfg.risk.max_position_usd_total } };
       })(),
       recent_launches: [...recent.values()].reverse().slice(0, 40),
-      open: o ? [{ bot: 'launch', lead_id: o.lead_id, market: o.market, symbol: o.display?.symbol ?? null, side: 'buy', entry_price_sol: o.entry_price_sol, held_s: Math.round((now() - o.opened_ms) / 1000) }] : [], ...extra });
+      open: o ? [{ bot: BOT, lead_id: o.lead_id, market: o.market, symbol: o.display?.symbol ?? null, side: 'buy', entry_price_sol: o.entry_price_sol, held_s: Math.round((now() - o.opened_ms) / 1000) }] : [], ...extra });
   }
 
-  return { onLaunch, scan, manageExit, resolveOutcomes, runSpotchecks, writeStatus, stats, risk, book, pending, broker, pessBroker };
+  return { profile, cfg, onLaunch, scan, manageExit, resolveOutcomes, runSpotchecks, writeStatus, stats, risk, book, pending, broker, pessBroker };
 }
 
 // ---------------------------------------------------------------- entrypoint
@@ -293,24 +319,31 @@ if (isMain(import.meta.url)) {
     ? createJudgeClient()
     : createLocalJudge({ ask: createMockJev({ version: cfg.model_version_pin }), model: cfg.model_version_pin, batteries });
   if (!process.env.JUDGE_URL) console.log('JUDGE_URL not set → in-process MOCK judge (heuristics, not Jev).');
-  const desk = createSolanaDesk({ mode, cfg, judge });
-  const feed = connectPumpPortal({ onLaunch: desk.onLaunch, onStatus: (s) => console.log(new Date().toISOString(), s.type, s.retry_ms ?? '') });
-  console.log(`solana launch desk mode=${mode} rpc=${process.env.SOLANA_RPC_URL ? 'custom' : 'public mainnet'} — paper only, never signs`);
+  const loose = ['1', 'true', 'yes'].includes(String(flag('loose', 'DESK_LOOSE', '0')).toLowerCase()) || process.argv.includes('--loose');
+  const rpc = createCachedRpc(createRpc());
+  const desks = [createSolanaDesk({ profile: 'strict', mode, cfg, judge, rpc })];
+  if (loose) desks.push(createSolanaDesk({ profile: 'loose', mode, cfg, judge, rpc }));
+  const feed = connectPumpPortal({ onLaunch: (l) => { for (const d of desks) d.onLaunch(l); }, onStatus: (s) => console.log(new Date().toISOString(), s.type, s.retry_ms ?? '') });
+  console.log(`solana launch desk mode=${mode} profiles=${desks.map((d) => d.profile).join('+')} rpc=${process.env.SOLANA_RPC_URL ? 'custom' : 'public mainnet'} — paper only, never signs`);
   let stopping = false;
   const stop = () => { stopping = true; feed.stop(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   const loop = async (fn, ms, name) => { while (!stopping) { const t = Date.now(); try { await fn(); } catch (e) { console.log(`${name} error: ${e.message}`); } const end = Date.now() + Math.max(250, ms - (Date.now() - t)); while (!stopping && Date.now() < end) await new Promise((r) => setTimeout(r, Math.min(500, end - Date.now()))); } };
   let beats = 0;
   const heartbeat = async () => {
-    desk.writeStatus({ feed_connected: feed.connected, feed_last_message_at: feed.lastMessageAt });
+    for (const d of desks) d.writeStatus({ feed_connected: feed.connected, feed_last_message_at: feed.lastMessageAt });
     if ((beats = (beats + 1) % 6) !== 1) return; // status every 10 s, console line every minute
-    const s = desk.stats, o = desk.book.open;
-    console.log(new Date().toISOString(), JSON.stringify({ seen: s.launches_seen, pending: desk.pending.size, scanned: s.scanned, judged: s.judged, entries: s.entries, exits: s.exits, pnl_usd: +s.realized_usd.toFixed(2), open: o ? `${o.display?.symbol ?? ''} ${o.market.slice(0, 6)}…` : null, halted: desk.risk.halted, top_rejections: Object.entries(s.rejections).sort((a, b) => b[1] - a[1]).slice(0, 4) }));
+    for (const d of desks) {
+      const s = d.stats, o = d.book.open;
+      console.log(new Date().toISOString(), d.profile.padEnd(6), JSON.stringify({ seen: s.launches_seen, pending: d.pending.size, scanned: s.scanned, judged: s.judged, entries: s.entries, exits: s.exits, pnl_usd: +s.realized_usd.toFixed(2), open: o ? `${o.display?.symbol ?? ''} ${o.market.slice(0, 6)}…` : null, halted: d.risk.halted, top_rejections: Object.entries(s.rejections).sort((a, b) => b[1] - a[1]).slice(0, 4) }));
+    }
   };
   await Promise.all([
-    loop(desk.scan, cfg.solana.scan_interval_ms, 'scan'),
-    loop(desk.manageExit, cfg.solana.exit_poll_ms, 'exit'),
-    loop(desk.resolveOutcomes, 15000, 'outcomes'),
+    ...desks.flatMap((d) => [
+      loop(d.scan, d.cfg.solana.scan_interval_ms, `${d.profile} scan`),
+      loop(d.manageExit, d.cfg.solana.exit_poll_ms, `${d.profile} exit`),
+      loop(d.resolveOutcomes, 15000, `${d.profile} outcomes`),
+    ]),
     loop(heartbeat, 10000, 'heartbeat'),
   ]);
 }

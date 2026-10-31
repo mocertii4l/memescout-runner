@@ -5,6 +5,8 @@ import { readStream, LOG_DIR } from '../reports/read.js';
 import { calibrationReport } from '../reports/calibration.js';
 import { loadConfig } from '../config/index.js';
 
+// Explore profiles (e.g. launch_loose) are shown for comparison but never counted in the account.
+const isExplore = (r) => /^launch_/.test(r.bot ?? '') || /^solana-/.test(r.runner ?? '');
 const botOf = (r) => r.bot ?? (String(r.market ?? '').startsWith('HOUSE-') ? 'house' : 'gambler');
 
 export function availableDays(dir = LOG_DIR) {
@@ -34,6 +36,7 @@ export function aggregate({ day, bot = 'all', dir = LOG_DIR, now = Date.now(), c
   const pnl = {};
   const fills = trades.filter((t) => ['filled', 'failed', 'written_off'].includes(t.status) || t.shadow_exit).sort((a, b) => a.ts - b.ts);
   for (const t of fills) {
+    if (t.ledger === 'optimistic' && isExplore(t)) continue; // explore desks: pessimistic line only, to keep the chart readable
     const b = botOf(t) + (t.ledger === 'optimistic' ? ':optimistic' : '');
     const v = t.realized_usd ?? t.pnl_usd ?? 0;
     const s = (pnl[b] ??= []);
@@ -54,8 +57,8 @@ export function aggregate({ day, bot = 'all', dir = LOG_DIR, now = Date.now(), c
   const count = (xs, f) => Object.entries(xs.reduce((m, x) => { const k = f(x); if (k != null) m[k] = (m[k] ?? 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]);
 
   const statuses = readStatuses(dir);
-  const totalPnl = Object.entries(pnl).filter(([k]) => !k.endsWith(':optimistic')).reduce((s, [, xs]) => s + (xs.at(-1)?.[1] ?? 0), 0);
-  const optimisticPnl = Object.entries(pnl).reduce((s, [k, xs]) => s + (k.endsWith(':optimistic') || !pnl[k + ':optimistic'] ? (xs.at(-1)?.[1] ?? 0) : 0), 0);
+  const totalPnl = Object.entries(pnl).filter(([k]) => !k.endsWith(':optimistic') && !k.startsWith('launch_')).reduce((s, [, xs]) => s + (xs.at(-1)?.[1] ?? 0), 0);
+  const optimisticPnl = Object.entries(pnl).filter(([k]) => !k.startsWith('launch_')).reduce((s, [k, xs]) => s + (k.endsWith(':optimistic') || !pnl[k + ':optimistic'] ? (xs.at(-1)?.[1] ?? 0) : 0), 0);
   const fees = trades.filter(counted).reduce((s, t) => s + (t.fee_usd ?? (t.fee_sol != null && t.sol_usd ? t.fee_sol * t.sol_usd : 0)), 0);
 
   return {
@@ -133,11 +136,12 @@ function summarizeSpotchecks(rows) {
 function account({ dir, statuses, cfg, now, keep }) {
   const A = cfg.account ?? { paper_start_usd: 1000, alert_max_loss_pct: 10, alert_drawdown_pct: 10 };
   const start = A.paper_start_usd;
-  const all = readStream('trades', { dir }).filter(keep).filter((t) => t.ledger !== 'optimistic');
+  const all = readStream('trades', { dir }).filter(keep).filter((t) => t.ledger !== 'optimistic' && !isExplore(t));
   const realizedRows = all.filter((t) => (['filled', 'failed', 'written_off'].includes(t.status) || t.shadow_exit) && Number.isFinite(t.realized_usd ?? t.pnl_usd)).sort((a, b) => a.ts - b.ts);
   let bal = start;
   const curve = [[realizedRows[0]?.ts ?? now, start]];
   for (const t of realizedRows) { bal += t.realized_usd ?? t.pnl_usd; curve.push([t.ts, +bal.toFixed(4)]); }
+  statuses = statuses.filter((s) => !isExplore(s));
   const live = statuses.filter((s) => now - s.ts < 180000);
   const floating = live.reduce((x, s) => x + (s.floating_usd ?? 0), 0);
   const exposure = live.reduce((x, s) => x + (s.exposure_usd ?? 0), 0);
@@ -147,7 +151,7 @@ function account({ dir, statuses, cfg, now, keep }) {
   const peak = Math.max(start, ...curve.map((p) => p[1]));
   const dayStart = new Date(new Date(now).toISOString().slice(0, 10)).getTime();
   const realizedToday = realizedRows.filter((t) => t.ts >= dayStart).reduce((x, t) => x + (t.realized_usd ?? t.pnl_usd), 0);
-  const exits = readStream('events', { dir }).filter(keep).filter((e) => e.type === 'exit' && e.ledger !== 'optimistic' && Number.isFinite(e.realized_usd));
+  const exits = readStream('events', { dir }).filter(keep).filter((e) => e.type === 'exit' && e.ledger !== 'optimistic' && !isExplore(e) && Number.isFinite(e.realized_usd));
   const dailyLimit = statuses.reduce((x, s) => x + (s.limits?.daily_loss_limit_usd ?? 0), 0);
   const posCap = statuses.reduce((x, s) => x + (s.limits?.max_position_usd_total ?? 0), 0);
   const openCount = live.reduce((x, s) => x + (s.open?.filter((o) => o.note !== 'shadow').length ?? 0), 0);

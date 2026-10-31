@@ -97,6 +97,21 @@ Every Solana paper trade is booked twice:
 
 The headline PnL, the daily loss limit and the risk engine all use the **pessimistic** ledger. The optimistic one is shown on the dashboard as a dashed "ceiling" line. Tune it under `solana.pessimistic`.
 
+### Loose profile (optional, alongside strict)
+
+```bash
+npm run solana:both          # strict + loose     (or: node solana-runner.js --loose, or DESK_LOOSE=1)
+```
+
+Runs a second, fully independent paper desk on the same launch feed, with relaxed thresholds from `solana_profiles.loose` in `config/desk.json`:
+- creator buy up to 20%
+- market cap from $4k
+- inflow from 1 SOL
+- top 10 holders up to 50%, single holder up to 15%
+- more judge candidates and looser judge cut-offs
+
+It has its own book, bench, risk engine and ledgers. Its trades are tagged `launch_loose` and are **never** counted in the account equity, balance or risk dials, which stay strict-only. Scam checks (mint/freeze authority open, graduated curve) are never relaxed. On the dashboard it gets its own P/L line, a line on the Solana card and a Strict/Loose switch on the Live launches table.
+
 ### Spot-check (automatic)
 
 Each paper fill gets checked 60 s later. The desk fetches real on-chain trades on the same bonding curve within ±15 s and compares prices. **Flattery** = how much better the paper fill was than what real traders got. The optimistic ledger will flatter you. If the pessimistic ledger also flatters you on a large share of fills, it isn't pessimistic enough, so raise `front_run_sol` / `extra_slippage_bps`. Results go to `logs/data/spotchecks-*.jsonl` and to the dashboard.

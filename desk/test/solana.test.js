@@ -202,3 +202,36 @@ test('spot-check parses real curve trades and measures paper optimism', () => {
   assert.equal(cmp.same_side_trades, 1);
   assert.ok(cmp.optimistic_bps > 0 && cmp.pessimistic_bps < 0);
 });
+
+test('loose profile trades what strict rejects, without touching the strict desk', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sol-'));
+  let t = 1_000_000;
+  const w = fakeWorld();
+  // 12% whale: strict (max 10%) rejects, loose (max 15%) accepts.
+  w.addLaunch({ mint: 'WHALEISH', whale: 120_000_000 });
+  const ask = async () => ({ model_version: cfg.model_version_pin, answers: { launch_kind: { type: 'choice', probs: { organic: 1 }, pick: 'organic', p: 1 }, rug: { type: 'noul', p: 0.1 }, momentum: { type: 'noul', p: 0.9 }, quality: { type: 'score', expected: 2.5 } } });
+  const judge = createLocalJudge({ ask, model: cfg.model_version_pin, batteries });
+  const logger = createLogger({ dir, now: () => t });
+  const common = { cfg, judge, rpc: w.rpc, logger, getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => 0.99 };
+  const strict = createSolanaDesk({ ...common, profile: 'strict' });
+  const loose = createSolanaDesk({ ...common, profile: 'loose' });
+  const ev = { mint: 'WHALEISH', id: 'WHALEISH', bonding_curve: 'curve-WHALEISH', creator_initial_buy_tokens: 20_000_000, received_at: t, _display: { symbol: 'W' } };
+  strict.onLaunch({ ...ev }); loose.onLaunch({ ...ev });
+  t += 60_000;
+  await strict.scan(); await loose.scan();
+  assert.equal(strict.stats.rejections.whale, 1);
+  assert.equal(strict.book.open, null, 'strict stays flat');
+  assert.equal(loose.book.open?.market, 'WHALEISH', 'loose takes the trade');
+  assert.equal(strict.cfg.solana.max_largest_holder_pct, 10, 'strict thresholds unchanged');
+  assert.equal(loose.cfg.solana.max_largest_holder_pct, 15);
+  assert.equal(loose.cfg.solana.max_top10_pct, 50);
+
+  strict.writeStatus(); loose.writeStatus();
+  const trades = readFileSync(join(dir, readdirSync(dir).find((f) => f.startsWith('trades'))), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.ok(trades.length > 0 && trades.every((x) => x.bot === 'launch_loose'));
+  const { aggregate } = await import('../dashboard/aggregate.js');
+  const a = aggregate({ dir, now: t });
+  assert.equal(a.account.exposure_usd, 0, 'loose exposure stays out of the account');
+  assert.equal(a.account.open_positions, 0);
+  assert.ok(a.statuses.some((s) => s.runner === 'solana-loose'));
+});
