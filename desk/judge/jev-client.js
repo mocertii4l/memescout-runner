@@ -97,13 +97,14 @@ function mockAnswer(q, s) {
       toxic_flow: sig(Math.abs(s.imbalance ?? 0) * 4 - 2.5),
       volume_alive: sig(((s.volume_pace_ratio ?? 1) - 0.3) * 6),
       consistent: sig(2 - Math.abs((s.move_vs_median_size ?? 1) - 1) * 2),
-      rug: sig((s.token_top10_pct ?? 50) / 10 - 6 + (s.token_flags?.length ?? 0)),
+      rug: sig(((s.token_top10_pct ?? s.top10_pct ?? 50) / 10 - 6) + (s.token_flags?.length ?? 0) + ((s.largest_holder_pct ?? 0) > 15 ? 1.5 : 0)),
+      momentum: sig(((s.inflow_sol_per_min ?? 0) - 1) * 1.5),
     }[q.id] ?? 0.5;
     return { type: 'noul', p: clamp(p) };
   }
   if (q.type === 'score') {
     const n = q.rubric.length;
-    const center = q.id === 'setup' ? Math.min(n - 1, Math.abs(trend) * 2) : q.id === 'environment' ? (n - 1) * sig(1 - Math.abs(trend)) : (n - 1) / 2;
+    const center = q.id === 'quality' ? Math.max(0, Math.min(n - 1, 1 + ((s.inflow_sol_per_min ?? 0) - 1) * 0.6 - ((s.top10_pct ?? 30) - 30) / 20)) : q.id === 'setup' ? Math.min(n - 1, Math.abs(trend) * 2) : q.id === 'environment' ? (n - 1) * sig(1 - Math.abs(trend)) : (n - 1) / 2;
     const w = q.rubric.map((_, i) => Math.exp(-((i - center) ** 2)));
     const z = w.reduce((a, b) => a + b, 0);
     const probs = w.map((x) => x / z);
@@ -114,6 +115,7 @@ function mockAnswer(q, s) {
   else if (q.id === 'action') { logits.long = trend * 1.5; logits.short = -trend * 1.5; logits.hold = 0.8; logits.other = -3; }
   else if (q.id === 'range_state') { const e = s.to_edge_bps ?? 100; logits.inside = e / 50; logits.testing_edge = 1 - Math.abs(e - 10) / 20; logits.breaking_out = -e / 20 + Math.abs(trend); logits.other = -3; }
   else if (q.id === 'wallet_kind') { const wr = s.wallet_win_rate ?? 0.5, n = s.wallet_trades ?? 0; logits.skilled = (wr - 0.5) * 8 * Math.min(1, n / 50); logits.lucky = n < 20 ? 1 : -1; logits.bot_like = (s.wallet_median_hold_s ?? 600) < 10 ? 2 : -1; logits.insider_like = (s.wallet_early_count ?? 0) > 10 ? 1.5 : -1; logits.unknown = n === 0 ? 3 : -2; logits.other = -3; }
+  else if (q.id === 'launch_kind') { const cb = s.creator_initial_buy_pct ?? 0; logits.organic = 1 - (s.top10_pct ?? 30) / 40; logits.bundled = (s.top10_pct ?? 30) / 20 - 1.5; logits.creator_dump_risk = cb / 5 - 1; logits.bot_farm = (s.holders_seen ?? 20) < 5 ? 1 : -1; logits.unknown = s.age_s == null ? 2 : -2; logits.other = -3; }
   else if (q.id === 'mirror') { const wr = s.wallet_win_rate ?? 0.5; logits.full = (wr - 0.6) * 10; logits.partial = 0.5; logits.skip = 1 - (wr - 0.5) * 5; logits.other = -3; }
   const z = Object.values(logits).reduce((a, l) => a + Math.exp(l), 0);
   const probs = Object.fromEntries(Object.entries(logits).map(([k, l]) => [k, Math.exp(l) / z]));

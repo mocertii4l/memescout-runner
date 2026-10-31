@@ -17,7 +17,7 @@ feed → state/ (code: mid, spread, imbalance, vol, returns, inventory, drawdown
 
 ```bash
 cd desk
-npm test                                   # 17 tests
+npm test                                   # 24 tests
 DESK_TICKS=500 npm run shadow              # Jev labels everything, nothing executes
 DESK_TICKS=500 npm run paper               # policy executes against the paper broker
 npm run report:daily                       # decisions, trades, PnL after fees, vetoes, fallbacks
@@ -35,6 +35,30 @@ JUDGE_URL=http://127.0.0.1:8787 npm run shadow
 ```
 
 Test the link from the bot's own host, not your laptop.
+
+## Live Solana launches (Spy, paper)
+
+```bash
+npm run solana          # paper: real pump.fun launches, simulated fills on the real bonding curve
+npm run solana:shadow   # same pipeline, logs what it would buy, no fills
+```
+
+What it does, in order:
+1. **Feed:** PumpPortal `subscribeNewToken` only, the same free creation stream the root worker uses. No metered trade subscriptions.
+2. **Wait:** each launch waits 45 s (too young to judge before that). After 5 min it expires and is never replayed.
+3. **Free cut** on event data: creator's initial buy over 10% of supply → rejected.
+4. **Enrich:** 3 read-only Solana RPC calls (mint account, bonding curve, top holders).
+5. **Hard facts in code:** mint authority open, freeze authority open, curve graduated, market cap under $6k, under 2 SOL of net inflow, top 10 holders (excluding the curve) over 35%, any single holder over 10%.
+6. **Jev** on the best 3 survivors (`questions/launch.js`). Token name, symbol and URI are attacker-controlled text, so they are **never** put in the state.
+7. **Policy → risk engine → paper fill** at the exact constant-product price, including the 1.25% fee and $0.10 gas per side.
+8. **EXIT seat** polls the curve every 5 s: +30% take, −15% stop, 10 min time stop, graduated, or no data after 2 retries → close.
+9. **Outcomes:** for every judged launch, `momentum` is checked against the price 2 min later and `rug` against a 50% drop within 10 min. These feed `report:calibration`.
+
+One position at a time: the scan is off while a position is open. Every number is under `solana` in `config/desk.json`.
+
+Env: `SOLANA_RPC_URL` (defaults to the public mainnet RPC, which is rate-limited; a free Helius/Triton read-only URL is better), plus optional `PUMPPORTAL_API_KEY`. The SOL price comes from Jupiter's public price API, falling back to `sol_usd_fallback`.
+
+⚠ Needs outbound network to `pumpportal.fun`, your RPC, and `lite-api.jup.ag`. Check the bonding-curve account layout in `feeds/pumpcurve.js` against the pump.fun program before trusting the PnL numbers.
 
 ## Layout
 

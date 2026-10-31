@@ -5,7 +5,6 @@
   "decision_deadline_ms": 350,
   "model_version_pin": "jev-1.13.0",
   "state_token_budget": 400,
-
   "risk": {
     "max_position_usd_per_market": 250,
     "max_position_usd_total": 250,
@@ -21,18 +20,21 @@
     "exit_data_retries": 2,
     "consecutive_error_halt": 5
   },
-
   "gambler": {
-    "enter_regimes": ["trending"],
+    "enter_regimes": [
+      "trending"
+    ],
     "min_setup_score": 2,
-    "min_action_prob": { "long": 0.7, "short": 0.75 },
+    "min_action_prob": {
+      "long": 0.7,
+      "short": 0.75
+    },
     "max_exec_degraded_prob": 0.4,
     "min_buy_pressure_for_long": 0.6,
     "ticket_usd": 100,
     "stop_bps": 40,
     "take_bps": 80
   },
-
   "house": {
     "grid_levels": 12,
     "grid_step_bps": 50,
@@ -46,9 +48,10 @@
     "as_kappa": 1.5,
     "as_horizon_s": 60
   },
-
   "spy": {
-    "mirror_labels": ["skilled"],
+    "mirror_labels": [
+      "skilled"
+    ],
     "min_skilled_prob": 0.65,
     "min_consistent_prob": 0.6,
     "max_rug_prob": 0.2,
@@ -58,7 +61,6 @@
     "max_signal_age_ms": 15000,
     "max_hold_ticks": 150
   },
-
   "funnel": {
     "min_liquidity_usd": 5000,
     "min_volume_5m_usd": 1000,
@@ -66,7 +68,6 @@
     "min_age_s": 60,
     "max_jev_candidates": 5
   },
-
   "bench_ttl_ms": {
     "honeypot": -1,
     "mint_authority_open": -1,
@@ -78,6 +79,58 @@
     "concentration": 1800000,
     "jev_rug": 7200000,
     "jev_not_worth_it": 1800000,
-    "default": 1800000
+    "default": 1800000,
+    "stale_signal": -1,
+    "creator_heavy_buy": -1,
+    "curve_missing": 300000,
+    "curve_complete": -1,
+    "whale": 1800000,
+    "no_inflow": 600000,
+    "enrich_failed": 120000,
+    "over_jev_cap": 60000,
+    "judge_unavailable": 60000,
+    "low_market_cap": 600000
+  },
+  "solana": {
+    "_comment": "Spy launch scanner on real pump.fun launches. Paper only. Amounts in USD are converted at the live SOL price (Jupiter), falling back to sol_usd_fallback.",
+    "sol_usd_fallback": 150,
+    "risk_overrides": {
+      "fee_bps": 125,
+      "min_fee_usd": 0,
+      "gas_usd_per_order": 0.1,
+      "max_position_usd_per_market": 25,
+      "max_position_usd_total": 25,
+      "daily_loss_limit_usd": 20
+    },
+    "ticket_usd": 20,
+    "take_bps": 3000,
+    "stop_bps": 1500,
+    "max_hold_ms": 600000,
+    "scan_interval_ms": 15000,
+    "exit_poll_ms": 5000,
+    "min_age_s": 45,
+    "max_age_s": 300,
+    "max_pending": 500,
+    "max_enrich_per_cycle": 8,
+    "max_jev_candidates": 3,
+    "max_creator_initial_buy_pct": 10,
+    "min_market_cap_usd": 6000,
+    "max_top10_pct": 35,
+    "max_largest_holder_pct": 10,
+    "min_inflow_sol": 2,
+    "policy": {
+      "max_rug_prob": 0.25,
+      "min_quality": 1.8,
+      "min_momentum_prob": 0.6,
+      "ok_kinds": [
+        "organic"
+      ],
+      "unknown_ticket_scale": 0.5
+    },
+    "outcomes": {
+      "momentum_horizon_ms": 120000,
+      "rug_horizon_ms": 600000,
+      "rug_drawdown": 0.5
+    }
   }
 }

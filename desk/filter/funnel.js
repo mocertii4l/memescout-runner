@@ -6,8 +6,21 @@
 //   4 Jev        — judgment only, on the few that remain (capped)
 //   5 final pick — one winner by sort key, or nothing. No trade is a result.
 
-export function createFunnel({ cfg, bench, enrich, judgeCandidate, logRejection = () => {} }) {
+export function createFunnel({ cfg, bench, enrich, judgeCandidate, logRejection = () => {}, freeCut = null, hardFacts = null, rankKey = (c) => c.volume_5m_usd ?? 0 }) {
   const F = cfg.funnel;
+  freeCut ??= (c) =>
+    c.liquidity_usd == null || c.liquidity_usd < F.min_liquidity_usd ? 'low_liquidity'
+    : c.volume_5m_usd == null || c.volume_5m_usd < F.min_volume_5m_usd ? 'low_volume'
+    : c.age_s == null || c.age_s < F.min_age_s ? 'too_young' : null;
+  hardFacts ??= (c) => {
+    const f = c.flags ?? {};
+    return f.honeypot ? 'honeypot'
+      : f.mint_authority_open ? 'mint_authority_open'
+      : f.freeze_authority_open ? 'freeze_authority_open'
+      : f.liquidity_locked === false ? 'liquidity_unlocked'
+      : (c.top10_pct ?? 100) > F.max_top10_holder_pct ? 'concentration'
+      : null;
+  };
 
   function reject(c, stage, check, extra = {}) {
     bench.bench(c.id, check);
@@ -22,9 +35,8 @@ export function createFunnel({ cfg, bench, enrich, judgeCandidate, logRejection 
     for (const c of candidates) {
       const b = bench.isBenched(c.id);
       if (b) { stats.bench++; continue; } // already logged when benched
-      if (c.liquidity_usd == null || c.liquidity_usd < F.min_liquidity_usd) { reject(c, 'free', 'low_liquidity'); stats.free++; continue; }
-      if (c.volume_5m_usd == null || c.volume_5m_usd < F.min_volume_5m_usd) { reject(c, 'free', 'low_volume'); stats.free++; continue; }
-      if (c.age_s == null || c.age_s < F.min_age_s) { reject(c, 'free', 'too_young'); stats.free++; continue; }
+      const cut = freeCut(c);
+      if (cut) { reject(c, 'free', cut); stats.free++; continue; }
       pool.push(c);
     }
 
@@ -38,19 +50,13 @@ export function createFunnel({ cfg, bench, enrich, judgeCandidate, logRejection 
     // 3: hard facts kill before judgments
     pool = [];
     for (const c of enriched) {
-      const f = c.flags ?? {};
-      const check = f.honeypot ? 'honeypot'
-        : f.mint_authority_open ? 'mint_authority_open'
-        : f.freeze_authority_open ? 'freeze_authority_open'
-        : f.liquidity_locked === false ? 'liquidity_unlocked'
-        : (c.top10_pct ?? 100) > F.max_top10_holder_pct ? 'concentration'
-        : null;
+      const check = hardFacts(c);
       if (check) { reject(c, 'facts', check); stats.facts++; continue; }
       pool.push(c);
     }
 
     // 4: Jev on the few that remain. Cheapest-first ordering, then capped.
-    pool.sort((a, b) => b.volume_5m_usd - a.volume_5m_usd);
+    pool.sort((a, b) => rankKey(b) - rankKey(a));
     for (const c of pool.slice(F.max_jev_candidates)) { reject(c, 'jev', 'over_jev_cap'); stats.jev++; }
     pool = pool.slice(0, F.max_jev_candidates);
     const judged = [];
