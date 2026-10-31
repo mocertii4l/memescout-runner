@@ -174,6 +174,17 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     },
     rankKey: (c) => c.sol_inflow ?? 0,
     judgeCandidate: async (c) => {
+      // Never judge stale state: enrichment can be tens of seconds old when the RPC is slow (seen live: a token
+      // dumped from 52 SOL to 1 SOL between enrichment and judgment). Re-read the curve and rebuild its fields.
+      const freshCurve = await rpc.curve(c.bonding_curve).catch(() => null);
+      if (freshCurve) {
+        const fp = spotPriceSol(freshCurve);
+        Object.assign(c, { curve: freshCurve, price_sol: fp, market_cap_usd: fp != null ? Number((fp * TOTAL_SUPPLY * sol.price).toFixed(0)) : null,
+          sol_inflow: Number((Number(freshCurve.realSolReserves) / 1e9 - (c.creator_initial_buy_sol ?? 0)).toFixed(3)) });
+        if (freshCurve.complete) return { pass: false, reason: 'curve_complete' };
+        if ((c.sol_inflow ?? 0) < S.min_inflow_sol) return { pass: false, reason: 'no_inflow' };
+      } else return { pass: false, reason: 'curve_missing' };
+      c.judged_price_sol = c.price_sol;
       const state = leanState(buildLaunchState(c, now()), batteries.launch.reads, cfg.state_token_budget);
       const res = await decider.decide('launch', state);
       if (!res.ok) { log.decision({ bot: BOT, mode, lead_id: c.lead_id, market: c.mint, state, fallback: res.fallback, kind: res.kind }); return { pass: false, reason: 'judge_unavailable' }; }
@@ -212,7 +223,16 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     if (mode === 'shadow') { log.trade({ bot: BOT, mode, shadow: true, lead_id: pick.lead_id, market: pick.mint, order }); return; }
     // Re-read the curve right before the paper fill so the price isn't stale by a whole scan.
     const fresh = await rpc.curve(pick.bonding_curve).catch(() => null);
-    broker.onBook(pick.mint, fresh ?? pick.curve);
+    if (!fresh) { log.event({ bot: BOT, type: 'entry_skipped', lead_id: pick.lead_id, reason: 'no_fresh_curve' }); track(pick.mint, { stage: 'rejected', detail: 'no fresh price at entry' }); return; }
+    // The state you judged must still be the state you trade.
+    const drift = Math.abs(Math.log(spotPriceSol(fresh) / pick.judged_price_sol)) * 1e4;
+    if (!(drift <= S.max_state_drift_bps) || fresh.complete) {
+      stats.rejections.state_changed = (stats.rejections.state_changed ?? 0) + 1;
+      log.rejection({ bot: BOT, market: pick.mint, lead_id: pick.lead_id, stage: 'entry', check: 'state_changed', drift_bps: Math.round(drift) });
+      track(pick.mint, { stage: 'rejected', detail: `price moved ${Math.round(drift / 100)}% since judged` });
+      return;
+    }
+    broker.onBook(pick.mint, fresh);
     const req = { ...order, sol_usd: sol.price, client_id: pick.lead_id, curve: pick.bonding_curve };
     const res = await broker.place(req);
     if (res.status !== 'filled') { log.event({ bot: BOT, type: 'entry_rejected', lead_id: pick.lead_id, reason: res.reason }); return; }

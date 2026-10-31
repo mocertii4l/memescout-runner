@@ -306,3 +306,18 @@ test('unknown holders: strict rejects, loose may trade at half ticket', async ()
   const spent = loose.pessBroker.position('NOH').cost_sol * 150;
   assert.ok(spent < cfg.solana.ticket_usd * 0.6, `half ticket expected, spent $${spent.toFixed(2)}`);
 });
+
+test('stale state guard: a dump between judgment and fill cancels the entry (seen live)', async () => {
+  let t = 0;
+  const w = fakeWorld(); w.addLaunch({ mint: 'DUMP' });
+  let judged = false;
+  const ask = async () => { judged = true; return { model_version: cfg.model_version_pin, answers: { launch_kind: { type: 'choice', probs: { organic: 1 }, pick: 'organic', p: 1 }, rug: { type: 'noul', p: 0.1 }, momentum: { type: 'noul', p: 0.9 }, quality: { type: 'score', expected: 2.5 } } }; };
+  // The judge call is where the time passes: dump the curve while it "thinks".
+  const judge = createLocalJudge({ ask: async (x) => { const r = await ask(x); w.pump('DUMP', 0.85) /* ~-28% price */; return r; }, model: cfg.model_version_pin, batteries });
+  const desk = createSolanaDesk({ cfg, judge, rpc: w.rpc, logger: createLogger({ dir: mkdtempSync(join(tmpdir(), 'sol-')) }), getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => 0.99 });
+  desk.onLaunch({ mint: 'DUMP', id: 'DUMP', bonding_curve: 'curve-DUMP', received_at: t, pool: 'pump', _display: {} });
+  t += 60_000; await desk.scan();
+  assert.ok(judged);
+  assert.equal(desk.book.open, null, 'no entry after the price moved');
+  assert.equal(desk.stats.rejections.state_changed, 1);
+});
