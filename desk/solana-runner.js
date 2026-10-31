@@ -26,6 +26,7 @@ import { RISKY_TOKEN_EXTENSIONS } from './feeds/solana-rpc.js';
 import { rowsFor } from './outcomes/resolvers.js';
 import { fetchRealTrades, compareFill } from './feeds/spotcheck.js';
 import { createNotifier, fmt as alertFmt } from './alerts/notify.js';
+import { readStream } from './reports/read.js';
 import { isMain, flag } from './config/main.js';
 
 const TOTAL_SUPPLY = 1_000_000_000;
@@ -89,7 +90,15 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
   const STATUS = profile === 'strict' ? 'solana' : `solana-${profile}`;
   const riskCfg = { ...cfg, risk: { ...cfg.risk, ...S.risk_overrides } };
   const log = logger;
-  const risk = createRiskEngine(riskCfg, { onVeto: (v) => { log.veto({ bot: BOT, ...v }); if (v.halt) notify.send(alertFmt.halt({ profile, why: `daily loss limit hit (${v.realizedToday?.toFixed?.(2)} USD)` }), { key: `halt-${profile}`, dedupeMs: 3600_000 }).catch(() => {}); } });
+  const risk = createRiskEngine(riskCfg, { now, onVeto: (v) => { log.veto({ bot: BOT, ...v }); if (v.halt) notify.send(alertFmt.halt({ profile, why: `daily loss limit hit (${v.realizedToday?.toFixed?.(2)} USD)` }), { key: `halt-${profile}`, dedupeMs: 3600_000 }).catch(() => {}); } });
+  // A restart must not reset the daily loss limit: replay today's realized P/L (pessimistic ledger) from the logs.
+  try {
+    const today = new Date(now()).toISOString().slice(0, 10);
+    const done = readStream('trades', { dir: log.dir, day: today })
+      .filter((t) => t.bot === BOT && t.ledger !== 'optimistic' && ['filled', 'failed', 'written_off'].includes(t.status) && Number.isFinite(t.realized_usd));
+    const sum = done.reduce((x, t) => x + t.realized_usd, 0);
+    if (done.length) { risk.recordPnl(sum); log.event({ bot: BOT, type: 'risk_restored', realized_today_usd: sum, trades: done.length, halted: risk.halted }); }
+  } catch { /* no history yet */ }
   // Two ledgers on every trade: optimistic is the ceiling, pessimistic is closer to a floor.
   // Risk limits and the headline PnL use the pessimistic one.
   const PS = S.pessimistic;
