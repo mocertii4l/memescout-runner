@@ -32,6 +32,7 @@ export function createLogger({ dir = process.env.DESK_LOG_DIR || DEFAULT_DIR, no
     trade: (r) => write('trades', r),
     veto: (r) => write('vetoes', r),
     rejection: (r) => write('rejections', r), // funnel: every no, with the check that fired
+    spotcheck: (r) => write('spotchecks', r), // paper fill vs what real traders paid at the same moment
     event: (r) => write('events', r), // fallback ladder, halts, mode changes
     /** Live status snapshot for the dashboard: overwritten atomically, not appended. */
     status(name, obj) {

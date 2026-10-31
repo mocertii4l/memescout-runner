@@ -1,7 +1,7 @@
 // Minimal read-only Solana JSON-RPC client. No keypairs, no sendTransaction — by construction.
 import { decodeCurve } from './pumpcurve.js';
 
-const READ_ONLY = new Set(['getAccountInfo', 'getMultipleAccounts', 'getTokenLargestAccounts', 'getTokenSupply', 'getHealth', 'getSlot']);
+const READ_ONLY = new Set(['getAccountInfo', 'getMultipleAccounts', 'getTokenLargestAccounts', 'getTokenSupply', 'getHealth', 'getSlot', 'getSignaturesForAddress', 'getTransaction']);
 
 export function createRpc({ url = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', fetchImpl = fetch, timeoutMs = 8000, retries = 2 } = {}) {
   let id = 0;

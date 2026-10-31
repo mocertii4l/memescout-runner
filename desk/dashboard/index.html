@@ -9,7 +9,7 @@
   color-scheme: light;
   --page: #f9f9f7; --surface-1: #fcfcfb; --text-primary: #0b0b0b; --text-secondary: #52514e; --muted: #898781;
   --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
-  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
   --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --up: #006300;
 }
 @media (prefers-color-scheme: dark) {
@@ -17,7 +17,7 @@
     color-scheme: dark;
     --page: #0d0d0d; --surface-1: #1a1a19; --text-primary: #f0efec; --text-secondary: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
-    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --up: #0ca30c;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --up: #0ca30c;
   }
 }
 * { box-sizing: border-box; }
@@ -108,6 +108,11 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 12px
       <div class="card span-8"><h2>Decisions per minute</h2><div class="legend" id="dpmLegend"></div><div id="dpmChart"></div>
         <details><summary>View as table</summary><div class="scroll" id="dpmTable"></div></details></div>
       <div class="card span-4"><h2>Funnel: why candidates were rejected</h2><div id="rejChart"></div></div>
+      <div class="card span-12"><h2>Spot-check: paper fills vs what real traders paid</h2>
+        <p class="sub" style="margin:0 0 10px">For each Solana paper fill, the desk fetches real on-chain trades on the same bonding curve within ±15 s.
+        <b>Flattery</b> = how much better the paper price was than reality (positive = paper is too kind). The pessimistic ledger should come out negative.</p>
+        <div class="kpis" id="spotKpis" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px"></div>
+        <div class="scroll" id="spotTable"></div></div>
       <div class="card span-6"><h2>Risk engine vetoes</h2><div id="vetoes"></div></div>
       <div class="card span-6"><h2>Policy outcomes</h2><div id="intents"></div></div>
       <div class="card span-12"><h2>Recent decisions</h2><div class="scroll" id="decisions"></div></div>
@@ -124,8 +129,9 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 12px
 <script>
 const $ = (id) => document.getElementById(id);
 const SVGNS = 'http://www.w3.org/2000/svg';
-const BOT_COLOR = { gambler: 'var(--series-1)', house: 'var(--series-2)', launch: 'var(--series-3)', spy: 'var(--series-3)' };
-const BOT_NAME = { gambler: 'Gambler', house: 'House', launch: 'Spy · Solana', spy: 'Spy' };
+const BOT_COLOR = { gambler: 'var(--series-1)', house: 'var(--series-2)', launch: 'var(--series-3)', spy: 'var(--series-3)', 'launch:optimistic': 'var(--series-4)' };
+const BOT_NAME = { gambler: 'Gambler', house: 'House', launch: 'Solana (pessimistic)', spy: 'Spy', 'launch:optimistic': 'Solana (optimistic)' };
+const DASHED = (bot) => bot.endsWith(':optimistic'); // secondary encoding: the ceiling line is dashed
 const token = new URLSearchParams(location.search).get('token');
 let timer = null, first = true;
 
@@ -198,9 +204,9 @@ function renderKpis(k) {
   const box = $('kpis'); box.replaceChildren();
   const tile = (label, value, note, cls, hero) => el('div', { class: 'card kpi' + (hero ? ' hero' : '') }, el('div', { class: 'label' }, label), el('div', { class: 'value ' + (cls ?? '') }, value), note ? el('div', { class: 'note' }, note) : '');
   box.append(
-    tile('Paper PnL after fees', fmtUsd(k.pnl_usd), `fees paid ${fmtUsd(k.fees_usd)}`, k.pnl_usd > 0 ? 'pos' : k.pnl_usd < 0 ? 'neg' : '', true),
+    tile(k.has_two_ledgers ? 'Paper PnL after fees (pessimistic)' : 'Paper PnL after fees', fmtUsd(k.pnl_usd), k.has_two_ledgers ? `optimistic ceiling ${fmtUsd(k.pnl_optimistic_usd)} · fees ${fmtUsd(k.fees_usd)}` : `fees paid ${fmtUsd(k.fees_usd)}`, k.pnl_usd > 0 ? 'pos' : k.pnl_usd < 0 ? 'neg' : '', true),
     tile('Decisions', k.decisions.toLocaleString(), `${k.fallbacks} fell back (held / halted)`),
-    tile('Paper fills', k.fills.toLocaleString()),
+    tile('Paper fills', k.fills.toLocaleString(), k.failed_tx ? `${k.failed_tx} simulated failed tx` : ''),
     tile('Risk vetoes · funnel rejections', `${k.vetoes} · ${k.rejections}`),
     tile('Judge latency', k.latency_p50 == null ? '—' : `${k.latency_p50} ms`, k.latency_p95 == null ? '' : `p95 ${k.latency_p95} ms · ${k.alerts} alerts`),
   );
@@ -218,7 +224,9 @@ function lineChart(host, seriesMap, { height = 240, yFmt = fmtUsd } = {}) {
   host.replaceChildren();
   const series = Object.entries(seriesMap).filter(([, pts]) => pts.length);
   if (!series.length) { host.append(el('div', { class: 'empty' }, 'No closed paper trades yet')); return; }
-  const W = host.clientWidth || 700, H = height, L = 64, R = 96, T = 10, B = 26;
+  const W = host.clientWidth || 700, H = height, L = 64, T = 10, B = 26;
+  const longest = Math.max(...series.map(([bot, pts]) => `${BOT_NAME[bot] ?? bot} ${yFmt(pts.at(-1)[1])}`.length));
+  const R = Math.min(240, 14 + longest * 6.4); // room for direct end labels
   const xs = series.flatMap(([, p]) => p.map((d) => d[0])), ys = series.flatMap(([, p]) => p.map((d) => d[1])).concat([0]);
   const x0 = Math.min(...xs), x1 = Math.max(...xs, x0 + 1);
   const ticks = axisTicks(Math.min(...ys), Math.max(...ys)); const y0 = ticks[0], y1 = ticks.at(-1);
@@ -233,7 +241,7 @@ function lineChart(host, seriesMap, { height = 240, yFmt = fmtUsd } = {}) {
   for (const [bot, pts] of series) {
     const all = [[x0, 0], ...pts];
     let d = ''; all.forEach(([t, v], i) => { d += (i ? `H${X(t).toFixed(1)}V${Y(v).toFixed(1)}` : `M${X(t).toFixed(1)},${Y(v).toFixed(1)}`); }); // step: PnL changes at fills
-    svg.append(el('svg:path', { d, fill: 'none', stroke: BOT_COLOR[bot], 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+    svg.append(el('svg:path', { d, fill: 'none', stroke: BOT_COLOR[bot], 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-dasharray': DASHED(bot) ? '6 4' : null }));
     ends.push({ bot, y: Y(pts.at(-1)[1]), v: pts.at(-1)[1] });
   }
   ends.sort((a, b) => a.y - b.y); for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 14);
@@ -364,7 +372,7 @@ function render(d) {
     { label: 'bot', get: (r) => BOT_NAME[r.bot] ?? r.bot },
     { label: 'market', cls: 'mono', get: (r) => short(r.market, 12) },
     { label: 'side', get: (r) => r.side },
-    { label: 'status', get: (r) => r.status },
+    { label: 'status', get: (r) => r.status + (r.ledger ? ` · ${r.ledger}` : '') },
     { label: 'size', num: true, get: (r) => r.notional_usd == null ? '—' : fmtUsd(r.notional_usd) },
     { label: 'realized', num: true, get: (r) => { const v = r.realized_usd; return v == null ? '—' : el('span', { class: v > 0 ? 'pos' : v < 0 ? 'neg' : '' }, fmtUsd(v)); } },
   ], d.recent_trades));
@@ -374,6 +382,26 @@ function render(d) {
     { label: 'type', get: (r) => r.type === 'alert' ? el('span', { class: 'status', style: 'color:var(--critical)' }, '■ alert') : r.type },
     { label: 'detail', get: (r) => r.msg ?? r.reason ?? r.kind ?? (r.lead_id ? `${r.lead_id}${r.realized_usd != null ? ' · ' + fmtUsd(r.realized_usd) : ''}` : '') },
   ], d.recent_events));
+
+  const sc = d.spotcheck, bps = (x) => x == null ? '—' : `${x > 0 ? '+' : ''}${Math.round(x)} bps`;
+  const flatter = (x) => x == null ? el('span', {}, '—') : el('span', { class: x > 0 ? 'neg' : 'pos' }, (x > 0 ? '▲ ' : '▼ ') + bps(x));
+  $('spotKpis').replaceChildren(
+    el('div', { class: 'card kpi' }, el('div', { class: 'label' }, 'Fills checked'), el('div', { class: 'value' }, `${sc.with_real_trades} / ${sc.checked}`), el('div', { class: 'note' }, 'with real trades in window / total')),
+    el('div', { class: 'card kpi' }, el('div', { class: 'label' }, 'Optimistic flattery (median)'), el('div', { class: 'value' }, flatter(sc.median_optimistic_bps)), el('div', { class: 'note' }, 'how much the ceiling overstates fills')),
+    el('div', { class: 'card kpi' }, el('div', { class: 'label' }, 'Pessimistic flattery (median)'), el('div', { class: 'value' }, flatter(sc.median_pessimistic_bps)), el('div', { class: 'note' }, 'should be ≤ 0')),
+    el('div', { class: 'card kpi' }, el('div', { class: 'label' }, 'Pessimistic still too kind'), el('div', { class: 'value' }, sc.pessimistic_too_kind_share == null ? '—' : `${Math.round(sc.pessimistic_too_kind_share * 100)}%`), el('div', { class: 'note' }, 'of fills; if high, raise slippage/front-run in config')),
+  );
+  $('spotTable').replaceChildren(sc.recent.length ? table([
+    { label: 'fill time', get: (r) => fmtTime(r.ts) },
+    { label: 'token', cls: 'mono', get: (r) => short(r.market, 10) },
+    { label: 'side', get: (r) => r.side },
+    { label: 'real trades', num: true, get: (r) => r.n },
+    { label: 'real median (SOL)', num: true, get: (r) => r.real_median_price_sol?.toExponential(3) ?? '—' },
+    { label: 'optimistic (SOL)', num: true, get: (r) => r.optimistic_price_sol?.toExponential(3) ?? '—' },
+    { label: 'flattery', num: true, get: (r) => flatter(r.optimistic_bps) },
+    { label: 'pessimistic (SOL)', num: true, get: (r) => r.pessimistic_price_sol?.toExponential(3) ?? '—' },
+    { label: 'flattery', num: true, get: (r) => flatter(r.pessimistic_bps) },
+  ], sc.recent) : el('div', { class: 'empty' }, 'No Solana fills checked yet. Checks run 60 s after each paper fill and need the live feed + RPC.'));
 
   const cal = $('calibration'); cal.replaceChildren();
   if (!d.calibration.length) cal.append(el('div', { class: 'empty' }, 'Not enough resolved outcomes yet (needs 5+ per question)'));

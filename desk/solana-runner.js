@@ -23,6 +23,7 @@ import { connectPumpPortal } from './feeds/pumpportal.js';
 import { createRpc, solUsd } from './feeds/solana-rpc.js';
 import { spotPriceSol, curveProgress } from './feeds/pumpcurve.js';
 import { rowsFor } from './outcomes/resolvers.js';
+import { fetchRealTrades, compareFill } from './feeds/spotcheck.js';
 
 const TOTAL_SUPPLY = 1_000_000_000;
 const MIGRATION_RESERVE = 206_900_000; // tokens the curve account keeps for migration
@@ -53,18 +54,24 @@ export function buildLaunchState(c, now = Date.now()) {
   };
 }
 
-export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rpc = createRpc(), logger = createLogger(), getSolUsd = () => solUsd({ fallback: cfg.solana.sol_usd_fallback }), now = () => Date.now() } = {}) {
+export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rpc = createRpc(), logger = createLogger(), getSolUsd = () => solUsd({ fallback: cfg.solana.sol_usd_fallback }), now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), rand } = {}) {
   const S = cfg.solana;
   const riskCfg = { ...cfg, risk: { ...cfg.risk, ...S.risk_overrides } };
   const log = logger;
   const risk = createRiskEngine(riskCfg, { onVeto: (v) => log.veto({ bot: 'launch', ...v }) });
-  const broker = createCurvePaperBroker({ feeBps: riskCfg.risk.fee_bps, onFill: (f) => log.trade({ bot: 'launch', mode, ...f }) });
+  // Two ledgers on every trade: optimistic is the ceiling, pessimistic is closer to a floor.
+  // Risk limits and the headline PnL use the pessimistic one.
+  const PS = S.pessimistic;
+  const onFill = (f) => { log.trade({ bot: 'launch', mode, ...f }); if (f.ledger === 'optimistic' && f.status === 'filled') spotQueue.push({ ts: now(), at: now() + S.spotcheck.delay_ms, lead_id: f.client_id, mint: f.market, curveKey: f.curve, side: f.side, optimistic_price_sol: f.fill_price_sol }); };
+  const broker = createCurvePaperBroker({ feeBps: riskCfg.risk.fee_bps, model: 'optimistic', onFill });
+  const pessBroker = createCurvePaperBroker({ feeBps: riskCfg.risk.fee_bps, model: 'pessimistic', pess: PS, ...(rand ? { rand } : {}), onFill });
+  const spotQueue = [];
   const book = createBook();
   const bench = createBench(cfg.bench_ttl_ms, { now });
   const decider = createDecider({ judge, deadlineMs: 2000, haltAfter: cfg.risk.consecutive_error_halt, onEvent: (e) => log.event({ bot: 'launch', ...e }) });
   const pending = new Map();
   const outcomeQueue = [];
-  const stats = { launches_seen: 0, dropped: 0, expired: 0, scanned: 0, judged: 0, entries: 0, exits: 0, vetoes: 0, rejections: {}, realized_usd: 0 };
+  const stats = { realized_usd_optimistic: 0, pess_entry_failed: 0, pess_exit_failed: 0, written_off: 0, spotchecks: 0, launches_seen: 0, dropped: 0, expired: 0, scanned: 0, judged: 0, entries: 0, exits: 0, vetoes: 0, rejections: {}, realized_usd: 0 };
   let sol = { price: S.sol_usd_fallback, source: 'config_fallback' }, exitFailures = 0;
 
   function onLaunch(l) {
@@ -145,10 +152,18 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
     // Re-read the curve right before the paper fill so the price isn't stale by a whole scan.
     const fresh = await rpc.curve(pick.bonding_curve).catch(() => null);
     broker.onBook(pick.mint, fresh ?? pick.curve);
-    const res = await broker.place({ ...order, sol_usd: sol.price, client_id: pick.lead_id });
+    const req = { ...order, sol_usd: sol.price, client_id: pick.lead_id, curve: pick.bonding_curve };
+    const res = await broker.place(req);
     if (res.status !== 'filled') { log.event({ bot: 'launch', type: 'entry_rejected', lead_id: pick.lead_id, reason: res.reason }); return; }
     stats.entries++;
-    book.claim({ lead_id: pick.lead_id, bot: 'launch', market: pick.mint, curveKey: pick.bonding_curve, entry_price_sol: res.fill_price_sol, opened_ms: now(), display: pick._display });
+    book.claim({ lead_id: pick.lead_id, bot: 'launch', market: pick.mint, curveKey: pick.bonding_curve, entry_price_sol: res.fill_price_sol, opened_ms: now(), display: pick._display, pessExitFailures: 0 });
+    // Pessimistic ledger: the same decision, filled after a delay on a re-read curve.
+    await sleep(PS.entry_delay_ms);
+    const later = await rpc.curve(pick.bonding_curve).catch(() => null);
+    pessBroker.onBook(pick.mint, later ?? fresh ?? pick.curve);
+    const pres = await pessBroker.place(req);
+    if (pres.status === 'failed') { stats.pess_entry_failed++; risk.recordPnl(pres.realized_usd); stats.realized_usd += pres.realized_usd; }
+    else if (pres.status === 'filled') { const sq = spotQueue.find((q) => q.lead_id === req.client_id && q.side === 'buy'); if (sq) sq.pessimistic_price_sol = pres.fill_price_sol; }
   }
 
   async function manageExit() {
@@ -165,17 +180,57 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
       const move = (Math.log(spotPriceSol(curve) / p.entry_price_sol)) * 1e4;
       reason = curve.complete ? 'graduated' : move >= S.take_bps ? 'take' : move <= -S.stop_bps ? 'stop' : now() - p.opened_ms >= S.max_hold_ms ? 'time_stop' : null;
     }
-    if (!reason) return;
+    if (!reason && !p.optimisticClosed) return;
     // A position you can't measure is a position you don't hold: close at the last known curve.
     // Graduated curves can't be sold on the curve in reality (liquidity moves to PumpSwap); paper closes at the final curve price and flags it.
-    const res = await broker.place({ market: p.market, side: 'sell', sol_usd: sol.price, client_id: `exit-${p.lead_id}` });
-    if (res.status === 'filled') { risk.recordPnl(res.realized_usd); stats.realized_usd += res.realized_usd; }
+    const sellReq = { market: p.market, side: 'sell', sol_usd: sol.price, client_id: `exit-${p.lead_id}`, curve: p.curveKey };
+    if (!p.optimisticClosed) {
+      const res = await broker.place(sellReq);
+      if (res.status === 'filled') stats.realized_usd_optimistic += res.realized_usd;
+      p.optimisticClosed = true; p.exitReason = reason;
+      log.event({ bot: 'launch', type: 'exit', ledger: 'optimistic', lead_id: p.lead_id, market: p.market, reason, realized_usd: res.realized_usd ?? null });
+    }
+    // Pessimistic ledger exits after a delay, may fail and retry on the next poll, and is written off after N failures.
+    if (pessBroker.position(p.market).tokens > 0) {
+      await sleep(PS.exit_delay_ms);
+      const later = await rpc.curve(p.curveKey).catch(() => null);
+      pessBroker.onBook(p.market, later ?? curve);
+      const pres = await pessBroker.place(sellReq);
+      if (pres.status === 'failed') {
+        stats.pess_exit_failed++;
+        if (++p.pessExitFailures < PS.exit_max_failures) return; // book stays open until the pessimistic ledger is out
+        const w = pessBroker.writeOff(p.market, sol.price);
+        stats.written_off++; risk.recordPnl(w.realized_usd); stats.realized_usd += w.realized_usd;
+        log.event({ bot: 'launch', type: 'exit', ledger: 'pessimistic', lead_id: p.lead_id, market: p.market, reason: 'written_off', realized_usd: w.realized_usd });
+      } else if (pres.status === 'filled') {
+        risk.recordPnl(pres.realized_usd); stats.realized_usd += pres.realized_usd;
+        const sq = spotQueue.find((q) => q.lead_id === sellReq.client_id); if (sq) sq.pessimistic_price_sol = pres.fill_price_sol;
+        log.event({ bot: 'launch', type: 'exit', ledger: 'pessimistic', lead_id: p.lead_id, market: p.market, reason: p.exitReason, realized_usd: pres.realized_usd });
+      }
+    }
     stats.exits++;
-    log.event({ bot: 'launch', type: 'exit', lead_id: p.lead_id, market: p.market, reason, realized_usd: res.realized_usd ?? null });
     book.release(p.lead_id, 'EXIT');
   }
 
+  /** Compare each paper fill with what real traders paid on the same curve at the same moment. */
+  async function runSpotchecks() {
+    const t = now();
+    for (let i = spotQueue.length - 1; i >= 0; i--) {
+      const q = spotQueue[i];
+      if (t < q.at) continue;
+      spotQueue.splice(i, 1);
+      if (!q.curveKey) continue;
+      try {
+        const real = await fetchRealTrades(rpc, { curveKey: q.curveKey, mint: q.mint, ts: q.ts, windowMs: S.spotcheck.window_ms, maxTx: S.spotcheck.max_tx });
+        const cmp = compareFill(q, real, S.spotcheck.window_ms);
+        stats.spotchecks++;
+        log.spotcheck({ bot: 'launch', lead_id: q.lead_id, market: q.mint, side: q.side, fill_ts: q.ts, optimistic_price_sol: q.optimistic_price_sol, pessimistic_price_sol: q.pessimistic_price_sol ?? null, ...cmp });
+      } catch (e) { log.event({ bot: 'launch', type: 'spotcheck_failed', lead_id: q.lead_id }); }
+    }
+  }
+
   async function resolveOutcomes() {
+    await runSpotchecks();
     const t = now();
     for (const o of outcomeQueue) {
       const needMom = !o.done.momentum && t >= o.momentumAt, needRug = !o.done.rug && t >= o.rugAt;
@@ -197,11 +252,11 @@ export function createSolanaDesk({ mode = 'paper', cfg = loadConfig(), judge, rp
 
   function writeStatus(extra = {}) {
     const o = book.open;
-    log.status('solana', { runner: 'solana', mode, feed: 'PumpPortal new tokens + Solana RPC', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, sol_usd: sol, pending: pending.size, counters: stats,
+    log.status('solana', { runner: 'solana', mode, feed: 'PumpPortal new tokens + Solana RPC', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, realized_optimistic_usd: stats.realized_usd_optimistic, sol_usd: sol, pending: pending.size, counters: stats,
       open: o ? [{ bot: 'launch', lead_id: o.lead_id, market: o.market, symbol: o.display?.symbol ?? null, side: 'buy', entry_price_sol: o.entry_price_sol, held_s: Math.round((now() - o.opened_ms) / 1000) }] : [], ...extra });
   }
 
-  return { onLaunch, scan, manageExit, resolveOutcomes, writeStatus, stats, risk, book, pending, broker };
+  return { onLaunch, scan, manageExit, resolveOutcomes, runSpotchecks, writeStatus, stats, risk, book, pending, broker, pessBroker };
 }
 
 // ---------------------------------------------------------------- entrypoint

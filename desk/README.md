@@ -17,7 +17,7 @@ feed → state/ (code: mid, spread, imbalance, vol, returns, inventory, drawdown
 
 ```bash
 cd desk
-npm test                                   # 26 tests
+npm test                                   # 30 tests
 DESK_TICKS=500 npm run shadow              # Jev labels everything, nothing executes
 DESK_TICKS=500 npm run paper               # policy executes against the paper broker
 npm run report:daily                       # decisions, trades, PnL after fees, vetoes, fallbacks
@@ -71,6 +71,21 @@ What it does, in order:
 9. **Outcomes:** for every judged launch, `momentum` is checked against the price 2 min later and `rug` against a 50% drop within 10 min. These feed `report:calibration`.
 
 One position at a time: the scan is off while a position is open. Every number is under `solana` in `config/desk.json`.
+
+### Two ledgers: optimistic vs pessimistic
+
+Every Solana paper trade is booked twice:
+
+| ledger | how it fills |
+|---|---|
+| **optimistic** (ceiling) | instantly, at the curve price just read |
+| **pessimistic** (closer to a floor) | waits 1.5 s and re-reads the curve; a sniper buys 0.5 SOL ahead of you; +3% slippage each way; 0.001 SOL priority fee per transaction; 15% of transactions fail (fee still paid, exits retry); an exit that fails 3 times is written off at zero |
+
+The headline PnL, the daily loss limit and the risk engine all use the **pessimistic** ledger. The optimistic one is shown on the dashboard as a dashed "ceiling" line. Tune it under `solana.pessimistic`.
+
+### Spot-check (automatic)
+
+Each paper fill gets checked 60 s later. The desk fetches real on-chain trades on the same bonding curve within ±15 s and compares prices. **Flattery** = how much better the paper fill was than what real traders got. The optimistic ledger will flatter you. If the pessimistic ledger also flatters you on a large share of fills, it isn't pessimistic enough, so raise `front_run_sol` / `extra_slippage_bps`. Results go to `logs/data/spotchecks-*.jsonl` and to the dashboard.
 
 Env: `SOLANA_RPC_URL` (defaults to the public mainnet RPC, which is rate-limited; a free Helius/Triton read-only URL is better), plus optional `PUMPPORTAL_API_KEY`. The SOL price comes from Jupiter's public price API, falling back to `sol_usd_fallback`.
 

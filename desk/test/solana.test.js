@@ -99,7 +99,7 @@ test('end to end: hard facts veto, a clean launch enters, take-profit exits and 
     rug: { type: 'noul', p: 0.1 }, momentum: { type: 'noul', p: 0.8 }, quality: { type: 'score', expected: 2.4, probs: null, max: 3 },
   } });
   const judge = createLocalJudge({ ask: goodAsk, model: cfg.model_version_pin, batteries });
-  const desk = createSolanaDesk({ mode: 'paper', cfg, judge, rpc: w.rpc, logger: createLogger({ dir, now: () => t }), getSolUsd: async () => ({ price: 150, source: 'test' }), now: () => t });
+  const desk = createSolanaDesk({ mode: 'paper', cfg, judge, rpc: w.rpc, logger: createLogger({ dir, now: () => t }), getSolUsd: async () => ({ price: 150, source: 'test' }), now: () => t, sleep: async () => {}, rand: () => 0.99 });
 
   w.addLaunch({ mint: 'GOOD' });
   w.addLaunch({ mint: 'MINTOPEN', mintAuthority: 'Someone' });
@@ -126,6 +126,7 @@ test('end to end: hard facts veto, a clean launch enters, take-profit exits and 
   await desk.manageExit();
   assert.equal(desk.book.open, null);
   assert.ok(desk.stats.realized_usd > 0, `expected profit, got ${desk.stats.realized_usd}`);
+  assert.ok(desk.stats.realized_usd_optimistic > desk.stats.realized_usd, 'pessimistic ledger must do worse than optimistic');
 
   const rej = readdirSync(dir).find((f) => f.startsWith('rejections'));
   const checks = readFileSync(join(dir, rej), 'utf8').trim().split('\n').map((l) => JSON.parse(l).check);
@@ -139,7 +140,7 @@ test('exit closes anyway when curve data stops coming', async () => {
   const ask = async () => ({ model_version: cfg.model_version_pin, answers: { launch_kind: { type: 'choice', probs: { organic: 1 }, pick: 'organic', p: 1 }, rug: { type: 'noul', p: 0 }, momentum: { type: 'noul', p: 0.9 }, quality: { type: 'score', expected: 3 } } });
   let fail = false;
   const rpc = { ...w.rpc, curve: async (k) => { if (fail) throw new Error('rpc down'); return w.rpc.curve(k); } };
-  const desk = createSolanaDesk({ cfg, judge: createLocalJudge({ ask, model: cfg.model_version_pin, batteries }), rpc, logger: createLogger({ dir: mkdtempSync(join(tmpdir(), 'sol-')) }), getSolUsd: async () => ({ price: 150 }), now: () => t });
+  const desk = createSolanaDesk({ cfg, judge: createLocalJudge({ ask, model: cfg.model_version_pin, batteries }), rpc, logger: createLogger({ dir: mkdtempSync(join(tmpdir(), 'sol-')) }), getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => 0.99 });
   desk.onLaunch({ mint: 'A', id: 'A', bonding_curve: 'curve-A', received_at: t, _display: {} });
   t += 60_000;
   await desk.scan();
@@ -148,4 +149,56 @@ test('exit closes anyway when curve data stops coming', async () => {
   for (let i = 0; i < cfg.risk.exit_data_retries; i++) { await desk.manageExit(); assert.ok(desk.book.open, 'retrying'); }
   await desk.manageExit();
   assert.equal(desk.book.open, null, 'closed after retries ran out');
+});
+
+import { createCurvePaperBroker } from '../broker/paper-curve.js';
+import { parseCurveTrade, compareFill, optimismBps } from '../feeds/spotcheck.js';
+
+test('pessimistic fills are worse than optimistic, and failures cost the fee', async () => {
+  const c = decodeCurve(curveBuf(fresh()));
+  const opt = createCurvePaperBroker({ model: 'optimistic' });
+  const pes = createCurvePaperBroker({ model: 'pessimistic', rand: () => 0.99 });
+  for (const b of [opt, pes]) b.onBook('M', c);
+  const req = { market: 'M', side: 'buy', notional_usd: 20, sol_usd: 150 };
+  const a = await opt.place(req), b = await pes.place(req);
+  assert.ok(b.fill_price_sol > a.fill_price_sol * 1.03, 'front-run + slippage must raise the entry price');
+  const failing = createCurvePaperBroker({ model: 'pessimistic', rand: () => 0 });
+  failing.onBook('M', c);
+  const f = await failing.place(req);
+  assert.equal(f.status, 'failed');
+  assert.ok(f.realized_usd < 0);
+  assert.equal(failing.position('M').tokens, 0);
+});
+
+test('pessimistic exit that keeps failing is written off', async () => {
+  const w = fakeWorld(); w.addLaunch({ mint: 'A' });
+  let t = 0, r = 0.99;
+  const ask = async () => ({ model_version: cfg.model_version_pin, answers: { launch_kind: { type: 'choice', probs: { organic: 1 }, pick: 'organic', p: 1 }, rug: { type: 'noul', p: 0 }, momentum: { type: 'noul', p: 0.9 }, quality: { type: 'score', expected: 3 } } });
+  const desk = createSolanaDesk({ cfg, judge: createLocalJudge({ ask, model: cfg.model_version_pin, batteries }), rpc: w.rpc, logger: createLogger({ dir: mkdtempSync(join(tmpdir(), 'sol-')) }), getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => r });
+  desk.onLaunch({ mint: 'A', id: 'A', bonding_curve: 'curve-A', received_at: t, _display: {} });
+  t += 60_000; await desk.scan();
+  assert.ok(desk.pessBroker.position('A').tokens > 0);
+  r = 0; // every pessimistic transaction now fails
+  w.pump('A', 1.5);
+  for (let i = 0; i < cfg.solana.pessimistic.exit_max_failures - 1; i++) { await desk.manageExit(); assert.ok(desk.book.open, 'still retrying'); }
+  await desk.manageExit();
+  assert.equal(desk.book.open, null);
+  assert.equal(desk.stats.written_off, 1);
+  assert.ok(desk.stats.realized_usd < 0 && desk.stats.realized_usd_optimistic > 0);
+});
+
+test('spot-check parses real curve trades and measures paper optimism', () => {
+  const tx = { blockTime: 100, meta: { err: null, preBalances: [5e9, 40e9], postBalances: [4e9, 41e9],
+    preTokenBalances: [{ owner: 'CURVE', mint: 'M', uiTokenAmount: { uiAmount: 800_000_000 } }],
+    postTokenBalances: [{ owner: 'CURVE', mint: 'M', uiTokenAmount: { uiAmount: 780_000_000 } }] },
+    transaction: { message: { accountKeys: [{ pubkey: 'USER' }, { pubkey: 'CURVE' }] } } };
+  const t = parseCurveTrade(tx, 'CURVE', 'M');
+  assert.equal(t.side, 'buy');
+  assert.ok(Math.abs(t.price_sol - 1 / 20_000_000) < 1e-15);
+  assert.equal(parseCurveTrade({ ...tx, meta: { ...tx.meta, err: { x: 1 } } }, 'CURVE', 'M'), null);
+  // paper bought at 0.9x what real buyers paid → paper flatters by 1000 bps
+  assert.equal(Math.round(optimismBps('buy', 0.9, 1)), 1000);
+  const cmp = compareFill({ ts: 100_000, side: 'buy', optimistic_price_sol: 0.9 * t.price_sol, pessimistic_price_sol: 1.05 * t.price_sol }, [t], 15000);
+  assert.equal(cmp.same_side_trades, 1);
+  assert.ok(cmp.optimistic_bps > 0 && cmp.pessimistic_bps < 0);
 });

@@ -58,3 +58,12 @@ export function curveFromEvent(vSolInBondingCurve, vTokensInBondingCurve) {
     realTokenReserves: null, realSolReserves: BigInt(Math.max(0, Math.round((vSolInBondingCurve - 30) * 1e9))), tokenTotalSupply: null, complete: false,
   };
 }
+
+/** The curve after someone else buys `solIn` SOL (net of fee) — used to simulate being front-run. */
+export function applyBuy(c, solIn) {
+  const vs = c.virtualSolReserves, vt = c.virtualTokenReserves;
+  const add = BigInt(Math.round(solIn * 1e9));
+  const newVs = vs + add;
+  const newVt = (vs * vt) / newVs;
+  return { ...c, virtualSolReserves: newVs, virtualTokenReserves: newVt, realSolReserves: c.realSolReserves != null ? c.realSolReserves + add : null, realTokenReserves: c.realTokenReserves != null ? c.realTokenReserves - (vt - newVt) : null };
+}

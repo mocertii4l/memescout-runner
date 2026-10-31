@@ -25,12 +25,15 @@ export function aggregate({ day, bot = 'all', dir = LOG_DIR, now = Date.now() } 
   const rejections = readStream('rejections', { dir, day }).filter(keep);
   const events = readStream('events', { dir, day }).filter(keep);
   const outcomes = readStream('outcomes', { dir, day }).filter(keep);
+  const spotchecks = readStream('spotchecks', { dir, day }).filter(keep);
+  // The optimistic ledger is a ceiling shown for comparison; headline numbers use everything else.
+  const counted = (t) => t.ledger !== 'optimistic';
 
   // Cumulative realized PnL after fees, per bot, from paper fills.
   const pnl = {};
-  const fills = trades.filter((t) => t.status === 'filled' || t.shadow_exit).sort((a, b) => a.ts - b.ts);
+  const fills = trades.filter((t) => ['filled', 'failed', 'written_off'].includes(t.status) || t.shadow_exit).sort((a, b) => a.ts - b.ts);
   for (const t of fills) {
-    const b = botOf(t);
+    const b = botOf(t) + (t.ledger === 'optimistic' ? ':optimistic' : '');
     const v = t.realized_usd ?? t.pnl_usd ?? 0;
     const s = (pnl[b] ??= []);
     s.push([t.ts, +(((s.at(-1)?.[1]) ?? 0) + v).toFixed(4)]);
@@ -50,17 +53,21 @@ export function aggregate({ day, bot = 'all', dir = LOG_DIR, now = Date.now() } 
   const count = (xs, f) => Object.entries(xs.reduce((m, x) => { const k = f(x); if (k != null) m[k] = (m[k] ?? 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]);
 
   const statuses = readStatuses(dir);
-  const totalPnl = Object.values(pnl).reduce((s, xs) => s + (xs.at(-1)?.[1] ?? 0), 0);
-  const fees = trades.reduce((s, t) => s + (t.fee_usd ?? (t.fee_sol != null && t.sol_usd ? t.fee_sol * t.sol_usd : 0)), 0);
+  const totalPnl = Object.entries(pnl).filter(([k]) => !k.endsWith(':optimistic')).reduce((s, [, xs]) => s + (xs.at(-1)?.[1] ?? 0), 0);
+  const optimisticPnl = Object.entries(pnl).reduce((s, [k, xs]) => s + (k.endsWith(':optimistic') || !pnl[k + ':optimistic'] ? (xs.at(-1)?.[1] ?? 0) : 0), 0);
+  const fees = trades.filter(counted).reduce((s, t) => s + (t.fee_usd ?? (t.fee_sol != null && t.sol_usd ? t.fee_sol * t.sol_usd : 0)), 0);
 
   return {
     generated_at: now, day, bot, days: availableDays(dir),
     statuses,
     kpis: {
       pnl_usd: +totalPnl.toFixed(2),
+      pnl_optimistic_usd: +optimisticPnl.toFixed(2),
+      has_two_ledgers: Object.keys(pnl).some((k) => k.endsWith(':optimistic')),
       fees_usd: +fees.toFixed(2),
       decisions: decisions.length,
-      fills: trades.filter((t) => t.status === 'filled').length,
+      fills: trades.filter((t) => t.status === 'filled' && counted(t)).length,
+      failed_tx: trades.filter((t) => t.status === 'failed').length,
       vetoes: vetoes.length,
       rejections: rejections.length,
       latency_p50: pct(0.5), latency_p95: pct(0.95),
@@ -79,9 +86,10 @@ export function aggregate({ day, bot = 'all', dir = LOG_DIR, now = Date.now() } 
       answers: summarizeAnswers(d.answers), symbol: d.display?.symbol ?? null,
     })),
     recent_trades: trades.slice(-30).reverse().map((t) => ({
-      ts: t.ts, bot: botOf(t), market: t.market ?? t.token ?? null, side: t.side ?? t.order?.side ?? null, status: t.status ?? (t.shadow ? 'shadow' : t.shadow_exit ? 'shadow_exit' : t.allowed === false ? 'vetoed' : ''),
+      ts: t.ts, bot: botOf(t), ledger: t.ledger ?? null, market: t.market ?? t.token ?? null, side: t.side ?? t.order?.side ?? null, status: t.status ?? (t.shadow ? 'shadow' : t.shadow_exit ? 'shadow_exit' : t.allowed === false ? 'vetoed' : ''),
       price: t.fill_price ?? t.fill_price_sol ?? null, notional_usd: t.notional_usd ?? t.order?.notional_usd ?? null, realized_usd: t.realized_usd ?? t.pnl_usd ?? null, fee_usd: t.fee_usd ?? null,
     })),
+    spotcheck: summarizeSpotchecks(spotchecks),
     recent_events: events.filter((e) => e.type !== 'funnel').slice(-30).reverse(),
     calibration: calibrationReport(outcomes.filter((r) => Number.isFinite(r.p))).filter((q) => q.n >= 5).sort((a, b) => b.n - a.n).slice(0, 8)
       .map(({ question, n, brier, base_rate, ece, buckets }) => ({ question, n, brier, base_rate, ece, buckets })),
@@ -98,4 +106,19 @@ function summarizeAnswers(a) {
     else out[k] = v.expected?.toFixed(2);
   }
   return out;
+}
+
+function summarizeSpotchecks(rows) {
+  const ok = rows.filter((r) => r.real_median_price_sol > 0);
+  const med = (xs) => { const s = xs.filter(Number.isFinite).sort((a, b) => a - b); if (!s.length) return null; const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  const share = (xs) => { const v = xs.filter(Number.isFinite); return v.length ? v.filter((x) => x > 0).length / v.length : null; };
+  return {
+    checked: rows.length,
+    with_real_trades: ok.length,
+    median_optimistic_bps: med(ok.map((r) => r.optimistic_bps)),
+    median_pessimistic_bps: med(ok.map((r) => r.pessimistic_bps)),
+    // Share of fills where even the pessimistic ledger did BETTER than real traders — it isn't pessimistic enough.
+    pessimistic_too_kind_share: share(ok.map((r) => r.pessimistic_bps)),
+    recent: rows.slice(-25).reverse().map((r) => ({ ts: r.fill_ts ?? r.ts, market: r.market, side: r.side, optimistic_bps: r.optimistic_bps, pessimistic_bps: r.pessimistic_bps, real_median_price_sol: r.real_median_price_sol, optimistic_price_sol: r.optimistic_price_sol, pessimistic_price_sol: r.pessimistic_price_sol, n: r.real_trades_in_window })),
+  };
 }

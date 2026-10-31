@@ -46,3 +46,21 @@ test('dashboard requires its token when one is set, and is read-only', async () 
     assert.equal((await fetch(base + '/api/summary?token=' + 't'.repeat(30), { method: 'POST' })).status, 405);
   } finally { srv.close(); }
 });
+
+test('headline PnL uses the pessimistic ledger; optimistic is shown as a ceiling; spot-checks summarized', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dash-'));
+  const t = Date.parse('2026-10-31T12:00:00Z');
+  const log = createLogger({ dir, now: () => t });
+  log.trade({ bot: 'launch', ledger: 'optimistic', status: 'filled', side: 'sell', realized_usd: 5 });
+  log.trade({ bot: 'launch', ledger: 'pessimistic', status: 'filled', side: 'sell', realized_usd: 1 });
+  log.trade({ bot: 'launch', ledger: 'pessimistic', status: 'failed', side: 'buy', realized_usd: -0.15 });
+  log.spotcheck({ bot: 'launch', market: 'M', side: 'buy', real_median_price_sol: 1, optimistic_bps: 200, pessimistic_bps: -300 });
+  log.spotcheck({ bot: 'launch', market: 'N', side: 'buy', real_median_price_sol: 1, optimistic_bps: 400, pessimistic_bps: 50 });
+  const a = aggregate({ dir, day: '2026-10-31' });
+  assert.equal(a.kpis.pnl_usd, 0.85);
+  assert.equal(a.kpis.pnl_optimistic_usd, 5);
+  assert.equal(a.kpis.fills, 1);
+  assert.equal(a.kpis.failed_tx, 1);
+  assert.equal(a.spotcheck.median_optimistic_bps, 300);
+  assert.equal(a.spotcheck.pessimistic_too_kind_share, 0.5);
+});

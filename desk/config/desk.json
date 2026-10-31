@@ -131,6 +131,21 @@
       "momentum_horizon_ms": 120000,
       "rug_horizon_ms": 600000,
       "rug_drawdown": 0.5
+    },
+    "pessimistic": {
+      "_comment": "Second paper ledger that assumes things go wrong. Risk limits use THIS ledger.",
+      "entry_delay_ms": 1500,
+      "exit_delay_ms": 1500,
+      "front_run_sol": 0.5,
+      "extra_slippage_bps": 300,
+      "fail_rate": 0.15,
+      "priority_fee_sol": 0.001,
+      "exit_max_failures": 3
+    },
+    "spotcheck": {
+      "delay_ms": 60000,
+      "window_ms": 15000,
+      "max_tx": 25
     }
   }
 }
