@@ -266,15 +266,18 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     let action = p.pendingAction ?? null; // a pessimistic sell that failed is retried with the same intent
     if (!action) {
       if (!curve) { if (exitFailures > R.exit_data_retries) action = { kind: 'full', reason: 'no_data_after_retries' }; else return; }
-      else {
+      else if (curve.complete) {
+        // Graduated: the curve is drained and liquidity moved to PumpSwap. Selling into the drained curve would book
+        // a fake -100% (seen live). Close at the last pre-graduation curve the brokers already hold, flagged.
+        action = { kind: 'full', reason: 'graduated' };
+      } else {
         broker.onBook(p.market, curve);
         const price = spotPriceSol(curve);
         p.mark_price_sol = price;
         const move = Math.log(price / p.entry_price_sol) * 1e4;
         p.peak_bps = Math.max(p.peak_bps ?? 0, move);
         const trailing = p.peak_bps >= S.trail_activate_bps && p.peak_bps - move >= S.trail_bps;
-        if (curve.complete) action = { kind: 'full', reason: 'graduated' };
-        else if (move <= -S.stop_bps) action = { kind: 'full', reason: 'stop' };
+        if (move <= -S.stop_bps) action = { kind: 'full', reason: 'stop' };
         else if (!p.partialDone && move >= S.take_bps && S.partial_fraction > 0 && S.partial_fraction < 1) action = { kind: 'partial', reason: 'partial_take', fraction: S.partial_fraction };
         else if (!p.partialDone && move >= S.take_bps) action = { kind: 'full', reason: 'take' };
         else if (trailing) action = { kind: 'full', reason: 'trailing_stop' };
@@ -295,7 +298,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     if (pessBroker.position(p.market).tokens > 0) {
       await sleep(PS.exit_delay_ms);
       const later = await rpc.curve(p.curveKey).catch(() => null);
-      pessBroker.onBook(p.market, later ?? curve);
+      pessBroker.onBook(p.market, [later, curve].find((c) => c && !c.complete) ?? null); // never a drained curve
       const pres = await pessBroker.place(sellReq);
       if (pres.status === 'failed') {
         stats.pess_exit_failed++;

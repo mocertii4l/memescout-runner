@@ -321,3 +321,19 @@ test('stale state guard: a dump between judgment and fill cancels the entry (see
   assert.equal(desk.book.open, null, 'no entry after the price moved');
   assert.equal(desk.stats.rejections.state_changed, 1);
 });
+
+test('graduation closes at the last pre-graduation price, not at zero (seen live)', async () => {
+  let t = 0;
+  const w = fakeWorld(); w.addLaunch({ mint: 'GRAD' });
+  const ask = async () => ({ model_version: cfg.model_version_pin, answers: { launch_kind: { type: 'choice', probs: { organic: 1 }, pick: 'organic', p: 1 }, rug: { type: 'noul', p: 0.1 }, momentum: { type: 'noul', p: 0.9 }, quality: { type: 'score', expected: 2.5 } } });
+  let drained = false;
+  const rpc = { ...w.rpc, async curve(k) { const c = await w.rpc.curve(k); return drained ? { ...c, complete: true, virtualSolReserves: 0n, virtualTokenReserves: 0n, realSolReserves: 0n, realTokenReserves: 0n } : c; } };
+  const desk = createSolanaDesk({ cfg, judge: createLocalJudge({ ask, model: cfg.model_version_pin, batteries }), rpc, logger: createLogger({ dir: mkdtempSync(join(tmpdir(), 'sol-')) }), getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => 0.99 });
+  desk.onLaunch({ mint: 'GRAD', id: 'GRAD', bonding_curve: 'curve-GRAD', received_at: t, pool: 'pump', _display: {} });
+  t += 60_000; await desk.scan();
+  assert.ok(desk.book.open);
+  drained = true;
+  await desk.manageExit();
+  assert.equal(desk.book.open, null);
+  assert.ok(desk.stats.realized_usd_optimistic > -2, `graduation must not book a total loss (got ${desk.stats.realized_usd_optimistic.toFixed(2)})`);
+});
