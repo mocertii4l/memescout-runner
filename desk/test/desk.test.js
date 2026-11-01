@@ -199,3 +199,12 @@ test('logger redacts secrets', () => {
   const line = readFileSync(join(dir, readdirSync(dir)[0]), 'utf8');
   assert.ok(!line.includes('sk-123') && !line.includes('abc'));
 });
+
+test('a daily-loss halt clears by itself at 00:00 UTC', () => {
+  let t = Date.parse('2026-10-31T23:00:00Z');
+  const risk = createRiskEngine(cfg, { now: () => t });
+  risk.recordPnl(-cfg.risk.daily_loss_limit_usd - 5);
+  assert.equal(risk.halted, 'daily_loss');
+  t = Date.parse('2026-11-01T00:00:05Z');
+  assert.equal(risk.halted, null);
+});

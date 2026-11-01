@@ -42,7 +42,7 @@ export function createRiskEngine(cfg, { now = () => Date.now(), onVeto = () => {
     check, recordPnl,
     halt(reason) { halted = reason; },
     resume() { halted = null; }, // only a human calls this
-    get halted() { return halted; },
+    get halted() { rollDay(); return halted; }, // a daily-loss halt must clear at 00:00 UTC even if nothing else runs
     get realizedToday() { rollDay(); return realizedToday; },
   };
 }
