@@ -174,6 +174,9 @@ a.lnk { color: var(--gold); text-decoration: none; font-size: 11.5px; } a.lnk:ho
     <div class="card span-8"><div class="cardhead"><h2>Decisions per minute</h2><span class="aside mono" id="latency"></span></div><div class="legend" id="dpmLegend"></div><div id="dpmChart"></div>
       <details><summary>View as table</summary><div class="scroll" id="dpmTable"></div></details></div>
     <div class="card span-4"><div class="cardhead"><h2>Funnel rejections</h2><span class="aside">why candidates were dropped</span></div><div id="rejChart"></div></div>
+    <div class="card span-12" id="ghostCard"><div class="cardhead"><h2>While halted · what it would have done</h2>
+      <span class="aside">when a desk hits its daily loss limit, a ghost copy keeps trading by the same rules. Not counted in equity, P/L or limits.</span></div>
+      <div class="kpi4" id="ghostKpis" style="grid-template-columns:repeat(2,1fr)"></div><div class="scroll" id="ghostTable"></div></div>
     <div class="card span-12"><div class="cardhead"><h2>Spot-check · paper fills vs real on-chain trades</h2>
       <span class="aside">±15 s on the same bonding curve · flattery = how much better paper was than reality (pessimistic should be ≤ 0)</span></div>
       <div class="kpi4" id="spotKpis"></div><div class="scroll" id="spotTable"></div></div>
@@ -486,6 +489,23 @@ function render(d) {
   hBars($('rejChart'), d.rejections_by_check);
 
   renderLaunches(d);
+
+  const g = d.ghost ?? { trades: [], totals: [], open: [] };
+  const gmini = (t) => el('div', { class: 'mini' }, el('div', { class: 'eyebrow' }, `${t.desk} · would have made`),
+    el('div', { class: 'v mono ' + cls(t.pessimistic_usd) }, fmtSigned(t.pessimistic_usd)),
+    el('div', { class: 'n' }, `${t.trades} trade${t.trades === 1 ? '' : 's'} · ${t.wins} won · best case ${fmtSigned(t.optimistic_usd)}`));
+  $('ghostKpis').replaceChildren(...g.totals.map(gmini));
+  const gopen = g.open.map((o) => ({ ts: null, desk: o.desk, symbol: o.symbol, mint: o.market, reason: `open · held ${o.held_s}s`, pessimistic_usd: null, optimistic_usd: null }));
+  const grow = [...gopen, ...g.trades];
+  $('ghostTable').replaceChildren(grow.length ? table([
+    { label: 'bought', get: (r) => (r.ts ? fmtTime(r.ts) : 'now') },
+    { label: 'desk', get: (r) => r.desk },
+    { label: 'coin', get: (r) => el('span', {}, el('b', { style: 'color:var(--text-primary)' }, r.symbol || '—'), el('span', { class: 'muted mono' }, `  ${short(r.mint, 6)}`)) },
+    { label: 'how it ended', get: (r) => String(r.reason ?? '').replaceAll('_', ' ') },
+    { label: 'would have made', num: true, get: (r) => (r.pessimistic_usd == null ? '—' : el('span', { class: cls(r.pessimistic_usd) }, fmtSigned(r.pessimistic_usd))) },
+    { label: 'best case', num: true, get: (r) => (r.optimistic_usd == null ? '—' : el('span', { class: cls(r.optimistic_usd) }, fmtSigned(r.optimistic_usd))) },
+    { label: 'look it up', get: (r) => (MINT_RE.test(r.mint ?? '') ? el('a', { class: 'lnk', href: `https://pump.fun/coin/${r.mint}`, target: '_blank', rel: 'noopener noreferrer' }, 'pump.fun') : '—') },
+  ], grow) : el('div', { class: 'empty' }, g.active ? 'No ghost trades yet. They only start while a desk is halted by its daily loss limit.' : 'Ghosts start with the next desk restart (npm run start:both).'));
 
   const sc = d.spotcheck, bps = (x) => x == null ? '—' : `${x > 0 ? '+' : ''}${Math.round(x)} bps`;
   const flatter = (x) => x == null ? el('span', {}, '—') : el('span', { class: x > 0 ? 'neg' : 'pos' }, (x > 0 ? '▲ ' : '▼ ') + bps(x));

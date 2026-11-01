@@ -81,14 +81,17 @@ export function buildLaunchState(c, now = Date.now()) {
   };
 }
 
-export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: baseCfg = loadConfig(), judge, rpc = createRpc(), logger = createLogger(), getSolUsd = () => solUsd({ fallback: baseCfg.solana.sol_usd_fallback }), now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), rand, notify = { send: async () => false } } = {}) {
+export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: baseCfg = loadConfig(), judge, rpc = createRpc(), logger = createLogger(), getSolUsd = () => solUsd({ fallback: baseCfg.solana.sol_usd_fallback }), now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), rand, notify = { send: async () => false }, ghostOf = null } = {}) {
   // Profiles are fully independent desks: own filters, book, bench, risk engine, ledgers and logs tag.
   // 'loose' only overrides thresholds; the scam checks (mint/freeze authority, graduated curve) are never relaxed.
   const cfg = profile === 'strict' ? baseCfg : { ...baseCfg, solana: mergeDeep(baseCfg.solana, baseCfg.solana_profiles?.[profile] ?? (() => { throw new Error(`unknown profile ${profile}`); })()) };
   const S = cfg.solana;
-  const BOT = profile === 'strict' ? 'launch' : `launch_${profile}`;
-  const STATUS = profile === 'strict' ? 'solana' : `solana-${profile}`;
-  const riskCfg = { ...cfg, risk: { ...cfg.risk, ...S.risk_overrides } };
+  // A ghost desk mirrors a real one with the same rules but only trades while the real desk is halted, to show
+  // what it would have done. Separate book, ledgers and logs tag (…_ghost); never counted in the account.
+  const BOT = (profile === 'strict' ? 'launch' : `launch_${profile}`) + (ghostOf ? '_ghost' : '');
+  const STATUS = (profile === 'strict' ? 'solana' : `solana-${profile}`) + (ghostOf ? '-ghost' : '');
+  const riskCfg = { ...cfg, risk: { ...cfg.risk, ...S.risk_overrides, ...(ghostOf ? { daily_loss_limit_usd: 1e9 } : {}) } };
+  if (ghostOf) notify = { send: async () => false };
   const log = logger;
   const risk = createRiskEngine(riskCfg, { now, onVeto: (v) => { log.veto({ bot: BOT, ...v }); if (v.halt) notify.send(alertFmt.halt({ profile, why: `daily loss limit hit (${v.realizedToday?.toFixed?.(2)} USD)` }), { key: `halt-${profile}`, dedupeMs: 3600_000 }).catch(() => {}); } });
   // A restart must not reset the daily loss limit: replay today's realized P/L (pessimistic ledger) from the logs.
@@ -219,6 +222,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     const why = risk.halted ? 'desk halted' : book.open ? 'not checked: a position was open' : 'not checked in time';
     for (const l of [...pending.values()]) if ((t - l.received_at) / 1000 > S.max_age_s) { pending.delete(l.mint); stats.expired++; track(l.mint, { stage: 'expired', detail: why }); } // never replayed as new
     if (risk.halted) return;
+    if (ghostOf && !ghostOf.risk.halted && !confirming) return; // ghosts only open trades while the real desk is halted
     if (!book.canScan) return; // one position at a time: no scan while one is open
     sol = await getSolUsd();
     if (confirming) return confirmPending(); // one pick at a time, including while it is being confirmed
@@ -427,7 +431,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
       open: o ? [{ bot: BOT, lead_id: o.lead_id, market: o.market, symbol: o.display?.symbol ?? null, side: 'buy', entry_price_sol: o.entry_price_sol, held_s: Math.round((now() - o.opened_ms) / 1000) }] : [], ...extra });
   }
 
-  return { profile, cfg, onLaunch, scan, confirmPending, manageExit, resolveOutcomes, runSpotchecks, writeStatus, stats, risk, book, pending, broker, pessBroker };
+  return { profile, ghost: Boolean(ghostOf), cfg, onLaunch, scan, confirmPending, manageExit, resolveOutcomes, runSpotchecks, writeStatus, stats, risk, book, pending, broker, pessBroker };
 }
 
 // ---------------------------------------------------------------- entrypoint
@@ -445,8 +449,9 @@ if (isMain(import.meta.url)) {
   console.log(notify.enabled ? `alerts on: ${notify.channels.join(' + ')}` : 'alerts off (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID or DISCORD_WEBHOOK_URL to get phone alerts)');
   const desks = [createSolanaDesk({ profile: 'strict', mode, cfg, judge, rpc, notify })];
   if (loose) desks.push(createSolanaDesk({ profile: 'loose', mode, cfg, judge, rpc, notify }));
+  for (const real of [...desks]) desks.push(createSolanaDesk({ profile: real.profile, mode, cfg, judge, rpc, ghostOf: real }));
   const feed = connectPumpPortal({ onLaunch: (l) => { for (const d of desks) d.onLaunch(l); }, onStatus: (s) => console.log(new Date().toISOString(), s.type, s.retry_ms ?? '') });
-  console.log(`solana launch desk mode=${mode} profiles=${desks.map((d) => d.profile).join('+')} rpc=${process.env.SOLANA_RPC_URL ? 'custom' : 'public mainnet'} — paper only, never signs`);
+  console.log(`solana launch desk mode=${mode} profiles=${desks.filter((d) => !d.ghost).map((d) => d.profile).join('+')} (+ ghosts that trade only while halted) rpc=${process.env.SOLANA_RPC_URL ? 'custom' : 'public mainnet'} — paper only, never signs`);
   let stopping = false;
   const stop = () => { stopping = true; feed.stop(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
@@ -470,7 +475,8 @@ if (isMain(import.meta.url)) {
     if ((beats = (beats + 1) % 6) !== 1) return; // status every 10 s, console line every minute
     for (const d of desks) {
       const s = d.stats, o = d.book.open;
-      console.log(new Date().toISOString(), d.profile.padEnd(6), JSON.stringify({ seen: s.launches_seen, pending: d.pending.size, scanned: s.scanned, judged: s.judged, entries: s.entries, exits: s.exits, pnl_usd: +s.realized_usd.toFixed(2), open: o ? `${o.display?.symbol ?? ''} ${o.market.slice(0, 6)}…` : null, halted: d.risk.halted, top_rejections: Object.entries(s.rejections).sort((a, b) => b[1] - a[1]).slice(0, 4) }));
+      if (d.ghost && !s.scanned && !o) continue; // ghost lines only once a ghost has something to say
+      console.log(new Date().toISOString(), (d.ghost ? d.profile + '·ghost' : d.profile).padEnd(12), JSON.stringify({ seen: s.launches_seen, pending: d.pending.size, scanned: s.scanned, judged: s.judged, entries: s.entries, exits: s.exits, pnl_usd: +s.realized_usd.toFixed(2), open: o ? `${o.display?.symbol ?? ''} ${o.market.slice(0, 6)}…` : null, halted: d.risk.halted, top_rejections: Object.entries(s.rejections).sort((a, b) => b[1] - a[1]).slice(0, 4) }));
     }
   };
   await Promise.all([

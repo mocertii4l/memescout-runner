@@ -130,6 +130,14 @@ You get:
 
 Messages are plain text, and Discord mentions are disabled (token names are attacker-controlled).
 
+### While halted: ghost desks
+
+When a desk hits its daily loss limit, it stops trading until 00:00 UTC. A **ghost** copy of it, with the same rules, filters, confirmation and exits, then keeps paper trading so you can see what it would have done.
+
+- **Tagging:** ghost trades are tagged `launch_ghost` / `launch_loose_ghost`.
+- **Isolation:** they never count towards equity, balance, P/L or risk limits.
+- **Dashboard:** they show in their own "While halted · what it would have done" section, with each coin, how it ended, and the would-be P/L (realistic and best case).
+
 ### Two ledgers: optimistic vs pessimistic
 
 Every Solana paper trade is booked twice:

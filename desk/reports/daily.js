@@ -3,7 +3,7 @@
 import { readStream } from './read.js';
 import { isMain } from '../config/main.js';
 
-const DESK = (bot) => ({ launch: 'strict', launch_loose: 'loose' })[bot] ?? bot ?? 'unknown';
+const DESK = (bot) => ({ launch: 'strict', launch_loose: 'loose', launch_ghost: 'strict (while halted, not counted)', launch_loose_ghost: 'loose (while halted, not counted)' })[bot] ?? bot ?? 'unknown';
 const usd = (x) => Math.round(x * 100) / 100;
 
 export function dailySummary(day) {

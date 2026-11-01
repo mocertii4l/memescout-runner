@@ -387,3 +387,33 @@ test('late curve: no entries past max_curve_progress_pct (55% strict, 65% loose)
   assert.equal(strict.stats.rejections.late_curve, 1);
   assert.ok(loose.book.open, 'loose allows up to 65%');
 });
+
+test('ghost desk: trades only while the real desk is halted, never counted in the account', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sol-'));
+  let t = Date.parse('2026-11-01T12:00:00Z');
+  const w = fakeWorld(); w.addLaunch({ mint: 'G1' }); w.addLaunch({ mint: 'G2' });
+  const ask = async () => ({ model_version: cfg.model_version_pin, answers: { launch_kind: { type: 'choice', probs: { organic: 1 }, pick: 'organic', p: 1 }, rug: { type: 'noul', p: 0.1 }, momentum: { type: 'noul', p: 0.9 }, quality: { type: 'score', expected: 2.5 } } });
+  const logger = createLogger({ dir, now: () => t });
+  const common = { cfg, judge: createLocalJudge({ ask, model: cfg.model_version_pin, batteries }), rpc: w.rpc, logger, getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => 0.99 };
+  const real = createSolanaDesk({ ...common });
+  const ghost = createSolanaDesk({ ...common, ghostOf: real });
+  // Not halted: the ghost stays out.
+  for (const d of [real, ghost]) d.onLaunch({ mint: 'G1', id: 'G1', bonding_curve: 'curve-G1', received_at: t, pool: 'pump', _display: { symbol: 'ONE' } });
+  t += 60_000; await real.scan(); await ghost.scan();
+  assert.ok(real.book.open); assert.equal(ghost.book.open, null);
+  // Halt the real desk: the ghost takes the next trade.
+  real.risk.halt('daily_loss');
+  for (const d of [real, ghost]) d.onLaunch({ mint: 'G2', id: 'G2', bonding_curve: 'curve-G2', received_at: t, pool: 'pump', _display: { symbol: 'TWO' } });
+  t += 60_000; await ghost.scan();
+  assert.equal(ghost.book.open?.market, 'G2');
+  w.pump('G2', 1.4); await ghost.manageExit(); w.pump('G2', 0.9); await ghost.manageExit();
+  assert.equal(ghost.book.open, null);
+  ghost.writeStatus(); real.writeStatus();
+  const { aggregate } = await import('../dashboard/aggregate.js');
+  const a = aggregate({ dir, now: t });
+  assert.equal(a.ghost.trades.length, 1);
+  assert.equal(a.ghost.trades[0].symbol, 'TWO');
+  assert.ok(a.ghost.trades[0].pessimistic_usd > 0);
+  assert.ok(!Object.keys(a.pnl).some((k) => /ghost/.test(k)), 'ghosts stay off the P/L chart');
+  assert.ok(Math.abs(a.account.balance_usd - cfg.account.paper_start_usd) < 1e-9, 'ghost profit never reaches the account');
+});

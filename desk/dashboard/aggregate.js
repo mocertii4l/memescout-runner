@@ -36,6 +36,7 @@ export function aggregate({ day, bot = 'all', dir = LOG_DIR, now = Date.now(), c
   const pnl = {};
   const fills = trades.filter((t) => ['filled', 'failed', 'written_off'].includes(t.status) || t.shadow_exit).sort((a, b) => a.ts - b.ts);
   for (const t of fills) {
+    if (/_ghost$/.test(t.bot ?? '')) continue; // ghosts have their own card
     if (t.ledger === 'optimistic' && isExplore(t)) continue; // explore desks: pessimistic line only, to keep the chart readable
     const b = botOf(t) + (t.ledger === 'optimistic' ? ':optimistic' : '');
     const v = t.realized_usd ?? t.pnl_usd ?? 0;
@@ -94,6 +95,7 @@ export function aggregate({ day, bot = 'all', dir = LOG_DIR, now = Date.now(), c
       price: t.fill_price ?? t.fill_price_sol ?? null, notional_usd: t.notional_usd ?? t.order?.notional_usd ?? null, realized_usd: t.realized_usd ?? t.pnl_usd ?? null, fee_usd: t.fee_usd ?? null,
     })),
     spotcheck: summarizeSpotchecks(spotchecks),
+    ghost: summarizeGhosts({ events, decisions: readStream('decisions', { dir, day }), statuses }),
     account: account({ dir, statuses, cfg, now, keep }),
     recent_events: events.filter((e) => e.type !== 'funnel').slice(-30).reverse(),
     calibration: calibrationReport(outcomes.filter((r) => Number.isFinite(r.p))).filter((q) => q.n >= 5).sort((a, b) => b.n - a.n).slice(0, 8)
@@ -169,5 +171,29 @@ function account({ dir, statuses, cfg, now, keep }) {
       drawdown: { used_usd: peak - equity, limit_usd: (peak * A.alert_drawdown_pct) / 100, enforced: false },
     },
     equity_curve: curve.length > 1500 ? curve.filter((_, i) => i % Math.ceil(curve.length / 1500) === 0 || i === curve.length - 1) : curve,
+  };
+}
+
+/** "While halted" ghost desks: what each real desk would have done while its daily loss limit had it paused. */
+function summarizeGhosts({ events, decisions, statuses }) {
+  const ghostBots = { launch_ghost: 'strict', launch_loose_ghost: 'loose' };
+  const entries = new Map();
+  for (const d of decisions) if (ghostBots[d.bot] && d.policy?.intent === 'enter') entries.set(d.lead_id, d);
+  const exits = {};
+  for (const e of events) if (ghostBots[e.bot] && e.type === 'exit') (exits[e.lead_id] ??= {})[e.ledger] = e;
+  const trades = [];
+  for (const [lead, d] of entries) {
+    const x = exits[lead];
+    if (!x) continue; // judged "enter" but cancelled before a fill (confirmation, drift, risk) or still open
+    trades.push({ ts: d.ts, desk: ghostBots[d.bot], mint: d.market, symbol: d.display?.symbol ?? null, reason: x.pessimistic?.reason ?? x.optimistic?.reason,
+      pessimistic_usd: x.pessimistic?.realized_usd ?? null, optimistic_usd: x.optimistic?.realized_usd ?? null });
+  }
+  trades.sort((a, b) => b.ts - a.ts);
+  const sum = (desk, k) => +trades.filter((t) => t.desk === desk).reduce((s, t) => s + (t[k] ?? 0), 0).toFixed(2);
+  const open = statuses.filter((s) => /-ghost$/.test(s.runner ?? '')).flatMap((s) => (s.open ?? []).map((o) => ({ ...o, desk: /loose/.test(s.runner) ? 'loose' : 'strict' })));
+  const active = statuses.filter((s) => /-ghost$/.test(s.runner ?? '')).length > 0;
+  return {
+    active, open, trades: trades.slice(0, 40),
+    totals: ['strict', 'loose'].map((desk) => ({ desk, trades: trades.filter((t) => t.desk === desk).length, wins: trades.filter((t) => t.desk === desk && (t.pessimistic_usd ?? 0) > 0).length, pessimistic_usd: sum(desk, 'pessimistic_usd'), optimistic_usd: sum(desk, 'optimistic_usd') })),
   };
 }
