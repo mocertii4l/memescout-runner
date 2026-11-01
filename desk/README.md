@@ -128,7 +128,7 @@ Every Solana paper trade is booked twice:
 | ledger | how it fills |
 |---|---|
 | **optimistic** (ceiling) | instantly, at the curve price just read |
-| **pessimistic** (closer to a floor) | waits 1.5 s and re-reads the curve; a sniper buys 0.5 SOL ahead of you; +3% slippage each way; 0.001 SOL priority fee per transaction; 15% of transactions fail (fee still paid, exits retry); an exit that fails 3 times is written off at zero |
+| **pessimistic** (closer to a floor) | waits 1.5 s and re-reads the curve; a sniper buys 0.15 SOL ahead of you; +1% slippage each way (calibrated from live spot-checks, Nov 2026); 0.001 SOL priority fee per transaction; 15% of transactions fail (fee still paid, exits retry); an exit that fails 3 times is written off at zero |
 
 The headline PnL, the daily loss limit and the risk engine all use the **pessimistic** ledger. The optimistic one is shown on the dashboard as a dashed "ceiling" line. Tune it under `solana.pessimistic`.
 

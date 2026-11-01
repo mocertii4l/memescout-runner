@@ -107,7 +107,7 @@
       "gas_usd_per_order": 0.1,
       "max_position_usd_per_market": 25,
       "max_position_usd_total": 25,
-      "daily_loss_limit_usd": 20
+      "daily_loss_limit_usd": 60
     },
     "ticket_usd": 20,
     "take_bps": 3000,
@@ -143,11 +143,12 @@
       "_comment": "Second paper ledger that assumes things go wrong. Risk limits use THIS ledger.",
       "entry_delay_ms": 1500,
       "exit_delay_ms": 1500,
-      "front_run_sol": 0.5,
-      "extra_slippage_bps": 300,
+      "front_run_sol": 0.15,
+      "extra_slippage_bps": 100,
       "fail_rate": 0.15,
       "priority_fee_sol": 0.001,
-      "exit_max_failures": 3
+      "exit_max_failures": 3,
+      "_calibration": "2026-11-01: lowered from 0.5 SOL / 300 bps after the first live day: spot-checks showed pessimistic fills 14.7% worse than real trades (optimistic 5.3% worse). Re-check the spot-check card; pessimistic should stay at or below 0."
     },
     "spotcheck": {
       "delay_ms": 60000,

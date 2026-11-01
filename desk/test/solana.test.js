@@ -342,14 +342,14 @@ test('a restart keeps today\'s losses: the daily limit cannot be reset by restar
   const dir = mkdtempSync(join(tmpdir(), 'sol-'));
   const t = Date.parse('2026-10-31T21:00:00Z');
   const logger = createLogger({ dir, now: () => t });
-  logger.trade({ bot: 'launch', ledger: 'pessimistic', status: 'filled', side: 'sell', realized_usd: -15 });
+  logger.trade({ bot: 'launch', ledger: 'pessimistic', status: 'filled', side: 'sell', realized_usd: -55 });
   logger.trade({ bot: 'launch', ledger: 'pessimistic', status: 'written_off', side: 'sell', realized_usd: -10.25 });
   logger.trade({ bot: 'launch', ledger: 'optimistic', status: 'filled', side: 'sell', realized_usd: 50 }); // ignored: ceiling ledger
   logger.trade({ bot: 'launch_loose', ledger: 'pessimistic', status: 'filled', side: 'sell', realized_usd: -99 }); // other desk
   const w = fakeWorld();
   const mk = (profile) => createSolanaDesk({ profile, cfg, judge: createLocalJudge({ ask: async () => ({}), model: cfg.model_version_pin, batteries }), rpc: w.rpc, logger, getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {} });
   const strict = mk('strict');
-  assert.equal(strict.risk.realizedToday, -25.25);
+  assert.equal(strict.risk.realizedToday, -65.25);
   assert.equal(strict.risk.halted, 'daily_loss');
   const loose = mk('loose');
   assert.equal(loose.risk.realizedToday, -99);
