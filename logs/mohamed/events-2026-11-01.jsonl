@@ -899,3 +899,13 @@
 {"ts":1793506529244,"bot":"launch","type":"exit","ledger":"pessimistic","lead_id":"S-Gh2LrmzN-mvxbfgna","market":"Gh2LrmzNgrchZnumpxHtPB9Z4ZSytPtrvPa7pcaSpump","reason":"stop","realized_usd":-6.254472174883348}
 {"ts":1793556435809,"bot":"launch","type":"risk_restored","realized_today_usd":-64.36437479789684,"trades":20,"halted":"daily_loss"}
 {"ts":1793556435811,"bot":"launch_loose","type":"risk_restored","realized_today_usd":-63.58430331936671,"trades":25,"halted":"daily_loss"}
+{"ts":1793566237490,"bot":"launch","type":"risk_restored","realized_today_usd":-64.36437479789684,"trades":20,"halted":"daily_loss"}
+{"ts":1793566237492,"bot":"launch_loose","type":"risk_restored","realized_today_usd":-63.58430331936671,"trades":25,"halted":"daily_loss"}
+{"ts":1793566297672,"bot":"launch_ghost","type":"funnel","stats":{"in":3,"bench":0,"free":3,"enrich":0,"facts":0,"jev":0,"picked":0},"sol_usd":{"price":94.17182351574579,"source":"jupiter"}}
+{"ts":1793566297693,"bot":"launch_loose_ghost","type":"funnel","stats":{"in":3,"bench":0,"free":3,"enrich":0,"facts":0,"jev":0,"picked":0},"sol_usd":{"price":94.17182351574579,"source":"jupiter"}}
+{"ts":1793566314058,"bot":"launch_ghost","type":"funnel","stats":{"in":5,"bench":0,"free":3,"enrich":0,"facts":2,"jev":0,"picked":0},"sol_usd":{"price":94.17534942803363,"source":"jupiter"}}
+{"ts":1793566314258,"bot":"launch_loose_ghost","type":"funnel","stats":{"in":5,"bench":0,"free":3,"enrich":0,"facts":2,"jev":0,"picked":0},"sol_usd":{"price":94.17534942803363,"source":"jupiter"}}
+{"ts":1793566328244,"bot":"launch_ghost","type":"funnel","stats":{"in":6,"bench":0,"free":5,"enrich":0,"facts":1,"jev":0,"picked":0},"sol_usd":{"price":94.15942549647755,"source":"jupiter"}}
+{"ts":1793566328452,"bot":"launch_loose_ghost","type":"funnel","stats":{"in":6,"bench":0,"free":5,"enrich":0,"facts":1,"jev":0,"picked":0},"sol_usd":{"price":94.15942549647755,"source":"jupiter"}}
+{"ts":1793566344849,"bot":"launch_ghost","type":"funnel","stats":{"in":4,"bench":0,"free":1,"enrich":0,"facts":3,"jev":0,"picked":0},"sol_usd":{"price":94.15777887661302,"source":"jupiter"}}
+{"ts":1793566345080,"bot":"launch_loose_ghost","type":"funnel","stats":{"in":4,"bench":0,"free":1,"enrich":0,"facts":3,"jev":0,"picked":0},"sol_usd":{"price":94.15777887661302,"source":"jupiter"}}
