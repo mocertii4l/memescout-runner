@@ -108,6 +108,15 @@ One position at a time: the scan is off while a position is open. Every number i
 - **Trailing stop:** once the trade has been +15% (`trail_activate_bps`), close the rest if it falls 10% (`trail_bps`) from its best.
 - **Other exits:** a 10-minute time stop, graduation, and no data after retries each close the whole position.
 
+### Sharing logs for analysis
+
+`npm run start:both` pushes `logs/data` to a separate **`desk-logs`** branch of this private repo every hour (first sync 2 minutes after start). That lets the data be analysed without sending files by hand. `npm run share-logs` syncs once on demand.
+
+- **What's shared:** only the JSONL logs and status files. Keys and RPC URLs are never written to logs.
+- **Isolation:** your working branch isn't touched; the sync uses its own worktree in `.desk-logs-worktree/`, which is gitignored.
+- **Failures:** if a sync fails (offline, no GitHub login), the desk keeps trading and tries again next hour.
+- **Turning it off:** start with `npm start` or `node start.mjs --loose`, without `--share-logs`.
+
 ### Alerts (optional)
 
 **Telegram:** message @BotFather → `/newbot` → copy the token. Send your new bot any message, then open `https://api.telegram.org/bot<token>/getUpdates` and copy `chat.id`. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.

@@ -62,3 +62,17 @@ process.on('SIGINT', () => stop(0));
 console.log(`desk supervisor: ${jobs.map((j) => j.name).join(' + ')}${env.DESK_LOOSE === '1' ? ' (strict + loose)' : ''} · logs ${logDir} · mode ${env.DESK_MODE}`);
 if (!publicHost) console.log(`dashboard: open http://127.0.0.1:${env.PORT || env.DASHBOARD_PORT || 8080} in your browser (Ctrl+C here stops everything)`);
 for (const j of jobs) run(j);
+
+// Optional: share logs hourly through the private repo's desk-logs branch (--share-logs). A failure never
+// stops trading; it is printed and retried next hour.
+if (args.includes('--share-logs')) {
+  const every = Math.max(10, Number(env.DESK_LOG_SYNC_MIN) || 60) * 60_000;
+  const share = () => {
+    if (stopping) return;
+    const c = spawn(process.execPath, ['tools/sync-logs.mjs'], { stdio: 'inherit', env, cwd: fileURLToPath(new URL('.', import.meta.url)) });
+    c.on('error', () => console.error('share-logs could not start'));
+  };
+  setTimeout(share, 120_000).unref(); // first sync 2 min after start, then hourly
+  setInterval(share, every).unref();
+  console.log(`logs are shared to the private repo's desk-logs branch every ${every / 60_000} min`);
+}

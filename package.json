@@ -9,6 +9,7 @@
     "report:daily": "npm --prefix desk run report:daily",
     "backup": "npm --prefix desk run backup",
     "dashboard:password": "npm --prefix desk run dashboard:password",
-    "test": "npm --prefix desk test"
+    "test": "npm --prefix desk test",
+    "share-logs": "npm --prefix desk run share-logs"
   }
 }
