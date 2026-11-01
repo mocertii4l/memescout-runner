@@ -12,7 +12,9 @@ import { createLocalJudge } from '../judge/client.js';
 import { batteries } from '../questions/index.js';
 import { createLogger } from '../logs/logger.js';
 
-const cfg = loadConfig();
+// Most tests check the pipeline in one scan; confirmation has its own tests below.
+const cfg = loadConfig({ solana: { confirm_ms: 0 } });
+const liveCfg = loadConfig();
 
 function curveBuf({ vt, vs, rt, rs, supply = 1_000_000_000n * 10n ** 6n, complete = false }) {
   const b = Buffer.alloc(8 + 40 + 1 + 32);
@@ -353,4 +355,35 @@ test('a restart keeps today\'s losses: the daily limit cannot be reset by restar
   assert.equal(strict.risk.halted, 'daily_loss');
   const loose = mk('loose');
   assert.equal(loose.risk.realizedToday, -99);
+});
+
+test('confirmation: a pick is re-checked 15 s later; a fade cancels it, a hold enters', async () => {
+  const ask = async () => ({ model_version: cfg.model_version_pin, answers: { launch_kind: { type: 'choice', probs: { organic: 1 }, pick: 'organic', p: 1 }, rug: { type: 'noul', p: 0.1 }, momentum: { type: 'noul', p: 0.9 }, quality: { type: 'score', expected: 2.5 } } });
+  for (const [factor, expectEntry] of [[0.95, false], [1.0, true]]) {
+    let t = 0;
+    const w = fakeWorld(); w.addLaunch({ mint: 'C' });
+    const desk = createSolanaDesk({ cfg: liveCfg, judge: createLocalJudge({ ask, model: cfg.model_version_pin, batteries }), rpc: w.rpc, logger: createLogger({ dir: mkdtempSync(join(tmpdir(), 'sol-')) }), getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => 0.99 });
+    desk.onLaunch({ mint: 'C', id: 'C', bonding_curve: 'curve-C', received_at: t, pool: 'pump', _display: {} });
+    t += 60_000; await desk.scan();
+    assert.equal(desk.book.open, null, 'no entry on the first look');
+    t += 5_000; await desk.scan();
+    assert.equal(desk.book.open, null, 'still confirming before 15 s');
+    w.pump('C', factor); // 0.95 on reserves = about -10% price
+    t += 15_000; await desk.scan();
+    assert.equal(Boolean(desk.book.open), expectEntry, `factor ${factor}`);
+    if (!expectEntry) assert.equal(desk.stats.rejections.faded_before_entry, 1);
+  }
+});
+
+test('late curve: no entries past max_curve_progress_pct (55% strict, 65% loose)', async () => {
+  assert.equal(liveCfg.solana.max_curve_progress_pct, 55);
+  let t = 0;
+  const w = fakeWorld(); w.addLaunch({ mint: 'LATE', sold: 500_000_000 }); // 63% of the curve sold
+  const ask = async () => ({ model_version: cfg.model_version_pin, answers: { launch_kind: { type: 'choice', probs: { organic: 1 }, pick: 'organic', p: 1 }, rug: { type: 'noul', p: 0.1 }, momentum: { type: 'noul', p: 0.9 }, quality: { type: 'score', expected: 2.5 } } });
+  const mk = (profile) => createSolanaDesk({ profile, cfg, judge: createLocalJudge({ ask, model: cfg.model_version_pin, batteries }), rpc: w.rpc, logger: createLogger({ dir: mkdtempSync(join(tmpdir(), 'sol-')) }), getSolUsd: async () => ({ price: 150 }), now: () => t, sleep: async () => {}, rand: () => 0.99 });
+  const strict = mk('strict'), loose = mk('loose');
+  for (const d of [strict, loose]) d.onLaunch({ mint: 'LATE', id: 'LATE', bonding_curve: 'curve-LATE', received_at: t, pool: 'pump', _display: {} });
+  t += 60_000; await strict.scan(); await loose.scan();
+  assert.equal(strict.stats.rejections.late_curve, 1);
+  assert.ok(loose.book.open, 'loose allows up to 65%');
 });

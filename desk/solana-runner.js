@@ -179,6 +179,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
       if (!c.holders && !S.allow_unknown_holders) return c.holders_error === 'rate_limited' ? 'rpc_rate_limited' : 'holders_unavailable';
       if (!c.holders) return null; // unknown holders: allowed by this profile, judged with blank fields, half ticket (policy)
       if ((c.market_cap_usd ?? 0) < S.min_market_cap_usd) return 'low_market_cap';
+      if (curveProgress(c.curve) * 100 > S.max_curve_progress_pct) return 'late_curve'; // seen live: 0 wins in 9 entries above 55%
       if ((c.sol_inflow ?? 0) < S.min_inflow_sol) return 'no_inflow';
       if (c.holders.top10_pct == null || c.holders.top10_pct > S.max_top10_pct) return 'concentration';
       if (c.holders.largest_holder_pct > S.max_largest_holder_pct) return 'whale';
@@ -194,6 +195,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
         Object.assign(c, { curve: freshCurve, price_sol: fp, market_cap_usd: fp != null ? Number((fp * TOTAL_SUPPLY * sol.price).toFixed(0)) : null,
           sol_inflow: Number((Number(freshCurve.realSolReserves) / 1e9 - (c.creator_initial_buy_sol ?? 0)).toFixed(3)) });
         if (freshCurve.complete) return { pass: false, reason: 'curve_complete' };
+        if (curveProgress(freshCurve) * 100 > S.max_curve_progress_pct) return { pass: false, reason: 'late_curve' };
         if ((c.sol_inflow ?? 0) < S.min_inflow_sol) return { pass: false, reason: 'no_inflow' };
       } else return { pass: false, reason: 'curve_missing' };
       c.judged_price_sol = c.price_sol;
@@ -211,6 +213,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     },
   });
 
+  let confirming = null;
   async function scan() {
     const t = now();
     const why = risk.halted ? 'desk halted' : book.open ? 'not checked: a position was open' : 'not checked in time';
@@ -218,6 +221,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     if (risk.halted) return;
     if (!book.canScan) return; // one position at a time: no scan while one is open
     sol = await getSolUsd();
+    if (confirming) return confirmPending(); // one pick at a time, including while it is being confirmed
     // Newest-first among those old enough: a launch close to max age is about to expire anyway.
     const batch = [...pending.values()].filter((l) => (t - l.received_at) / 1000 >= S.min_age_s).sort((a, b) => b.received_at - a.received_at).slice(0, S.max_enrich_per_cycle);
     for (const l of batch) pending.delete(l.mint);
@@ -228,6 +232,34 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
     const { pick, stats: fs } = await funnel.run(cands);
     log.event({ bot: BOT, type: 'funnel', stats: fs, sol_usd: sol });
     if (!pick) return; // no trade is a result
+    if (!(S.confirm_ms > 0)) return enter(pick);
+    // Confirmation: don't buy the spike. Hold the pick for one more look before entering (seen live: entries in
+    // the first seconds after a hot judgment were mostly stopped out within 3-10 s).
+    confirming = { pick, at: now() + S.confirm_ms, price0: pick.judged_price_sol };
+    track(pick.mint, { stage: 'picked', detail: `confirming: re-check in ${Math.round(S.confirm_ms / 1000)}s` });
+  }
+
+  async function confirmPending() {
+    const c = confirming; if (!c || now() < c.at) return;
+    confirming = null;
+    const { pick } = c;
+    const fresh = await rpc.curve(pick.bonding_curve).catch(() => null);
+    const drop = fresh ? Math.log(spotPriceSol(fresh) / c.price0) * 1e4 : null;
+    const prog = fresh ? curveProgress(fresh) * 100 : null;
+    const check = !fresh ? 'no_fresh_curve' : fresh.complete ? 'curve_complete' : drop < -S.confirm_max_drop_bps ? 'faded_before_entry' : prog > S.max_curve_progress_pct ? 'late_curve' : null;
+    if (check) {
+      stats.rejections[check] = (stats.rejections[check] ?? 0) + 1;
+      log.rejection({ bot: BOT, market: pick.mint, lead_id: pick.lead_id, stage: 'confirm', check, move_bps: drop == null ? null : Math.round(drop) });
+      track(pick.mint, { stage: 'rejected', detail: check === 'faded_before_entry' ? `price fell ${Math.round(-drop / 100)}% while confirming` : check.replaceAll('_', ' ') });
+      return;
+    }
+    // Judged state is re-anchored to the confirmed price; the entry drift guard then checks the fill against it.
+    pick.judged_price_sol = spotPriceSol(fresh);
+    pick.curve = fresh;
+    await enter(pick);
+  }
+
+  async function enter(pick) {
     const { intent, model_version } = pick.verdict;
     const order = { market: pick.mint, side: 'buy', notional_usd: intent.notional_usd, leverage: 1, expected_edge_bps: intent.expected_edge_bps };
     const v = risk.check(order, { positions: Object.fromEntries(Object.keys(broker.positions()).map((m) => [m, S.ticket_usd])), model_version });
@@ -395,7 +427,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
       open: o ? [{ bot: BOT, lead_id: o.lead_id, market: o.market, symbol: o.display?.symbol ?? null, side: 'buy', entry_price_sol: o.entry_price_sol, held_s: Math.round((now() - o.opened_ms) / 1000) }] : [], ...extra });
   }
 
-  return { profile, cfg, onLaunch, scan, manageExit, resolveOutcomes, runSpotchecks, writeStatus, stats, risk, book, pending, broker, pessBroker };
+  return { profile, cfg, onLaunch, scan, confirmPending, manageExit, resolveOutcomes, runSpotchecks, writeStatus, stats, risk, book, pending, broker, pessBroker };
 }
 
 // ---------------------------------------------------------------- entrypoint

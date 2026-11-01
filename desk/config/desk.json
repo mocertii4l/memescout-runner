@@ -96,7 +96,10 @@
     "holders_unavailable": 0,
     "not_pump_pool": -1,
     "mayhem_mode": -1,
-    "serial_launcher": -1
+    "serial_launcher": -1,
+    "late_curve": -1,
+    "faded_before_entry": -1,
+    "no_fresh_curve": 60000
   },
   "solana": {
     "_comment": "Spy launch scanner on real pump.fun launches. Paper only. Amounts in USD are converted at the live SOL price (Jupiter), falling back to sol_usd_fallback.",
@@ -114,7 +117,7 @@
     "stop_bps": 1500,
     "max_hold_ms": 600000,
     "scan_interval_ms": 15000,
-    "exit_poll_ms": 5000,
+    "exit_poll_ms": 2000,
     "min_age_s": 45,
     "max_age_s": 300,
     "max_pending": 500,
@@ -164,7 +167,11 @@
     "max_launches_per_creator": 2,
     "allow_unknown_holders": false,
     "max_state_drift_bps": 1000,
-    "max_transient_retries": 3
+    "max_transient_retries": 3,
+    "max_curve_progress_pct": 55,
+    "confirm_ms": 15000,
+    "confirm_max_drop_bps": 500,
+    "_live_tuning_2026_11_01": "From 44 live paper trades: exits polled every 2 s (stops were filling ~28% below entry at 5 s); no entries above 55% curve progress (0 wins in 9); a pick must hold within -5% for 15 s before entry (most stops fired 3-10 s after a hot entry)."
   },
   "account": {
     "_comment": "Paper account shown on the dashboard. Daily loss and position caps are ENFORCED by each runner's risk engine; the two alert levels below are display-only warnings.",
@@ -193,7 +200,8 @@
           "bundled"
         ]
       },
-      "allow_unknown_holders": true
+      "allow_unknown_holders": true,
+      "max_curve_progress_pct": 65
     }
   }
 }
