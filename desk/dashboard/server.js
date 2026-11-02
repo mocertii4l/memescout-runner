@@ -6,13 +6,15 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { aggregate } from './aggregate.js';
 import { createAuth, readCookie } from './auth.js';
+import { currentSettings, validate, saveSettings } from '../config/settings.js';
+import { createLogger } from '../logs/logger.js';
 import { isMain, flag } from '../config/main.js';
 
 const PAGE = fileURLToPath(new URL('./index.html', import.meta.url));
 const LOGIN = fileURLToPath(new URL('./login.html', import.meta.url));
 const COOKIE = 'desk_session';
 
-export function createDashboard({ auth = createAuth({ user: process.env.DASHBOARD_USER?.trim(), passwordHash: process.env.DASHBOARD_PASSWORD_HASH?.trim() }), dir, trustProxy = process.env.DASHBOARD_TRUST_PROXY === '1', secureCookie = process.env.DASHBOARD_SECURE_COOKIE === '1' } = {}) {
+export function createDashboard({ settingsFile, auth = createAuth({ user: process.env.DASHBOARD_USER?.trim(), passwordHash: process.env.DASHBOARD_PASSWORD_HASH?.trim() }), dir, trustProxy = process.env.DASHBOARD_TRUST_PROXY === '1', secureCookie = process.env.DASHBOARD_SECURE_COOKIE === '1' } = {}) {
   return createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     const base = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin', 'cache-control': 'no-store', 'x-frame-options': 'DENY' };
@@ -51,6 +53,26 @@ export function createDashboard({ auth = createAuth({ user: process.env.DASHBOAR
 
     const session = auth.enabled ? auth.check(readCookie(req, COOKIE)) : { user: 'local' };
     if (!session) return url.pathname.startsWith('/api/') ? send(401, { ...base, 'content-type': 'application/json' }, '{"error":"login_required"}') : redirect('/login');
+    if (url.pathname === '/api/settings') {
+      const json = { ...base, 'content-type': 'application/json' };
+      if (req.method === 'GET') return send(200, json, JSON.stringify(currentSettings(settingsFile ? { settingsFile } : {})));
+      if (req.method !== 'POST') return send(405, base);
+      // A custom header can't be sent cross-site without CORS approval, so other websites can't change settings.
+      if (req.headers['x-desk-settings'] !== '1' || !String(req.headers['content-type'] ?? '').startsWith('application/json')) return send(403, json, '{"error":"forbidden"}');
+      let raw = '';
+      for await (const chunk of req) { raw += chunk; if (raw.length > 8192) return send(413, json, '{"error":"too_large"}'); }
+      let body; try { body = JSON.parse(raw); } catch { return send(400, json, '{"error":"bad_json"}'); }
+      const opts = settingsFile ? { settingsFile } : {};
+      let result;
+      if (body.reset === true) result = saveSettings({}, { ...opts, reset: true });
+      else {
+        const v = validate(body.changes);
+        if (!v.ok) return send(400, json, JSON.stringify({ error: 'invalid', errors: v.errors }));
+        result = saveSettings(v.clean, opts);
+      }
+      try { createLogger(dir ? { dir } : {}).event({ type: 'settings_changed', by: session.user, reset: body.reset === true, diff: result.diff }); } catch {}
+      return send(200, json, JSON.stringify({ ok: true, diff: result.diff, settings: result.settings }));
+    }
     if (req.method !== 'GET') return send(405, base);
 
     if (url.pathname === '/' || url.pathname === '/index.html') return send(200, html, readFileSync(PAGE));

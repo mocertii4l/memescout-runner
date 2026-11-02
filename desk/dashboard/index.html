@@ -119,6 +119,20 @@ details summary { cursor: pointer; color: var(--muted); font-size: 11.5px; margi
 .stage.waiting { color: var(--muted); } .stage.rejected, .stage.expired { color: var(--text-secondary); } .stage.judged { color: #8fb8f0; }
 .stage.picked, .stage.bought { color: var(--up); border-color: rgba(63,207,142,.35); } .stage.sold { color: var(--gold); border-color: rgba(214,168,78,.35); }
 a.lnk { color: var(--gold); text-decoration: none; font-size: 11.5px; } a.lnk:hover { text-decoration: underline; }
+dialog#settings { width: min(920px, 96vw); max-height: 90vh; padding: 18px 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,.12); background: #0e131c; color: var(--text-primary); box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+dialog#settings::backdrop { background: rgba(3,5,9,.7); }
+.setbody { max-height: 62vh; overflow: auto; }
+.setbody table td { vertical-align: middle; }
+.setbody .grp td { color: var(--gold); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; padding-top: 14px; border-bottom: 1px solid var(--line); }
+.setbody input { width: 110px; font: inherit; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; background: #0a0e15; color: var(--text-primary); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; text-align: right; }
+.setbody input:focus { outline: 2px solid rgba(214,168,78,.5); }
+.setbody input.changed { border-color: var(--gold); }
+.setbody input.bad { border-color: var(--critical); }
+.setbody .unit { color: var(--muted); font-size: 11px; margin-left: 6px; }
+.setbody .def { color: var(--muted); font-size: 11px; }
+.setfoot { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+.btn.primary { background: var(--gold); color: #17120a; border-color: var(--gold); font-weight: 700; }
+.setmsg { margin-top: 10px; font-size: 12.5px; min-height: 18px; }
 .warnrow { display: flex; gap: 6px; font-size: 11px; color: var(--text-secondary); margin-top: 6px; }
 </style>
 </head>
@@ -133,6 +147,7 @@ a.lnk { color: var(--gold); text-decoration: none; font-size: 11.5px; } a.lnk:ho
     <div class="clock"><div class="eyebrow">Server · UTC</div><div class="v mono" id="utcTime">—</div></div>
     <div class="clock"><div class="eyebrow">Last update</div><div class="v mono" id="lastUpdate">—</div></div>
     <span class="pill warn" id="livePill"><span class="d"></span><span id="liveText">LOADING</span></span>
+    <button class="btn" id="openSettings" type="button">⚙ Settings</button>
     <span class="user" id="who"></span>
     <form method="post" action="/logout" id="logoutForm" style="display:none"><button class="btn" type="submit">Sign out</button></form>
   </div>
@@ -187,6 +202,21 @@ a.lnk { color: var(--gold); text-decoration: none; font-size: 11.5px; } a.lnk:ho
     <div class="card span-6"><div class="cardhead"><h2>Events &amp; alerts</h2></div><div class="scroll" id="events"></div></div>
     <div class="card span-12"><div class="cardhead"><h2>Calibration</h2><span class="aside">does a 0.8 come true 80% of the time? dashed = perfect · dot size = samples</span></div><div class="cal" id="calibration"></div></div>
   </div>
+  <dialog id="settings" aria-labelledby="setTitle">
+    <form method="dialog" id="setForm">
+      <div class="cardhead" style="margin-bottom:6px"><h2 id="setTitle">Settings</h2>
+        <span class="aside">paper trading only · saved changes apply to the running desks within ~10 s, no restart</span>
+        <button class="btn right" value="cancel" type="submit" aria-label="Close">✕</button></div>
+      <div id="setBody" class="setbody"></div>
+      <div class="setmsg" id="setMsg" role="status"></div>
+      <div class="setfoot">
+        <button class="btn" type="button" id="setReset">Reset all to defaults</button>
+        <span style="flex:1"></span>
+        <button class="btn" value="cancel" type="submit">Cancel</button>
+        <button class="btn primary" type="button" id="setSave">Save changes</button>
+      </div>
+    </form>
+  </dialog>
   <div class="tooltip" id="tip"></div>
 </div>
 
@@ -580,6 +610,60 @@ function renderLaunches(d) {
     { label: 'look it up', get: (r) => MINT_RE.test(r.mint) ? el('span', {}, el('a', { class: 'lnk', href: `https://pump.fun/coin/${r.mint}`, target: '_blank', rel: 'noopener noreferrer' }, 'pump.fun'), '  ', el('a', { class: 'lnk', href: `https://solscan.io/token/${r.mint}`, target: '_blank', rel: 'noopener noreferrer' }, 'solscan')) : '—' },
   ], rows) : el('div', { class: 'empty' }, sol ? 'Waiting for the first launch…' : 'Start the scanner: npm run solana'));
 }
+
+// ---------- Settings panel ----------
+let settingsData = null;
+async function openSettings() {
+  $('setMsg').textContent = '';
+  try {
+    const r = await fetch('/api/settings', { credentials: 'same-origin' });
+    if (r.status === 401) { location.href = '/login'; return; }
+    settingsData = await r.json();
+  } catch { $('setMsg').textContent = 'Could not load settings.'; }
+  renderSettings();
+  $('settings').showModal();
+}
+function renderSettings() {
+  const d = settingsData; if (!d) return;
+  const t = el('table'), head = el('tr', {}, el('th', {}, 'Setting'), el('th', { class: 'num' }, 'Strict'), el('th', { class: 'num' }, 'Loose'), el('th', {}, 'Default (strict / loose)'));
+  t.append(el('thead', {}, head));
+  const tb = el('tbody'); let group = null;
+  for (const f of d.fields) {
+    if (f.group !== group) { group = f.group; tb.append(el('tr', { class: 'grp' }, el('td', { colspan: 4 }, group))); }
+    const cell = (profile) => {
+      const cur = d.profiles[profile][f.key];
+      const inp = el('input', { type: 'number', step: 'any', min: f.min, max: f.max, value: cur.value, 'data-p': profile, 'data-k': f.key, 'aria-label': `${f.label} (${profile})` });
+      inp.addEventListener('input', () => { const v = Number(inp.value); inp.classList.toggle('changed', inp.value !== '' && v !== cur.value); inp.classList.toggle('bad', inp.value === '' || v < f.min || v > f.max); });
+      return el('td', { class: 'num' }, inp, el('span', { class: 'unit' }, f.unit));
+    };
+    tb.append(el('tr', {}, el('td', {}, f.label, el('div', { class: 'def' }, `allowed ${f.min}–${f.max}${f.unit === '%' ? '%' : f.unit ? ' ' + f.unit : ''}`)), cell('strict'), cell('loose'),
+      el('td', { class: 'def' }, `${d.profiles.strict[f.key].default} / ${d.profiles.loose[f.key].default}${f.unit === '%' ? '%' : f.unit ? ' ' + f.unit : ''}`)));
+  }
+  t.append(tb); $('setBody').replaceChildren(t);
+}
+async function postSettings(body) {
+  const r = await fetch('/api/settings', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-desk-settings': '1' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.href = '/login'; return null; }
+  if (!r.ok) { $('setMsg').replaceChildren(el('span', { style: 'color:var(--critical)' }, '■ ' + (j.errors?.join(' · ') || j.error || 'Could not save.'))); return null; }
+  return j;
+}
+function showSaved(j, label) {
+  settingsData = j.settings; renderSettings();
+  const lines = j.diff.length ? j.diff.map((x) => `${x.desk}: ${x.setting} ${x.from} → ${x.to}`).join(' · ') : 'nothing changed';
+  $('setMsg').replaceChildren(el('span', { style: 'color:var(--up)' }, `● ${label}: ${lines}. The running desks pick this up within ~10 s.`));
+}
+$('openSettings').addEventListener('click', openSettings);
+$('setSave').addEventListener('click', async () => {
+  const changes = {};
+  for (const inp of $('setBody').querySelectorAll('input.changed')) { if (inp.classList.contains('bad')) { $('setMsg').replaceChildren(el('span', { style: 'color:var(--critical)' }, '■ Fix the fields outlined in red first.')); return; } (changes[inp.dataset.p] ??= {})[inp.dataset.k] = Number(inp.value); }
+  if (!Object.keys(changes).length) { $('setMsg').textContent = 'No changes to save.'; return; }
+  const j = await postSettings({ changes }); if (j) showSaved(j, 'Saved');
+});
+$('setReset').addEventListener('click', async () => {
+  if (!window.confirm('Reset every setting on both desks to the defaults?')) return;
+  const j = await postSettings({ reset: true }); if (j) showSaved(j, 'Reset to defaults');
+});
 
 async function load() {
   const body = $('body'); if (!first) body.classList.add('loading');

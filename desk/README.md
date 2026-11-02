@@ -130,6 +130,23 @@ You get:
 
 Messages are plain text, and Discord mentions are disabled (token names are attacker-controlled).
 
+### Settings from the dashboard
+
+Click **⚙ Settings** in the dashboard header to change the strict and loose desks separately:
+- **Size & limits:** ticket size, daily loss limit
+- **Entry filters:** min buying, max curve progress, min market cap, holder limits, creator buy, confirmation
+- **Exits:** stop-loss, take-profit level and portion, trailing stop, max hold time
+- **Judge thresholds:** max rug risk, min momentum, min quality
+
+How it behaves:
+- **No restart:** the running desks apply a save within ~10 s; open positions continue under the new exit rules.
+- **Bounds:** every field has hard limits, and out-of-range values are refused.
+- **Independent desks:** changing strict never moves loose.
+- **Position caps:** these follow the ticket size, so a bigger ticket isn't vetoed by an old cap.
+- **Audit:** every change is logged (`settings_changed`, with who and what).
+- **Security:** the API needs the dashboard login (when configured) and a same-site request.
+- **Storage:** changes live in `config/local.json`, which is gitignored so `git pull` never overwrites it. On Render that's `/var/data/settings.json`, which survives deploys. **Reset all to defaults** restores `config/desk.json`.
+
 ### Research recorder + backtest
 
 The live runner also records the **price path of every plausible launch** without trading it:

@@ -1,2 +1,4 @@
 desk/backups/
 .desk-logs-worktree/
+desk/config/local.json
+desk/config/local.json.tmp

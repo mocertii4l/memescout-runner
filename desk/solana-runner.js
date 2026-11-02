@@ -6,7 +6,8 @@
 //   PumpPortal subscribeNewToken ─► pending launches (aged 45s–5min)
 //     ─► funnel: bench → free cut (event data) → enrich (RPC: mint, curve, holders) → hard facts → Jev (≤3) → pick
 //     ─► policy ─► risk engine ─► curve paper broker ─► EXIT seat polls the curve (take / stop / time / graduated / no data)
-import { loadConfig } from './config/index.js';
+import { loadConfig, SETTINGS_FILE } from './config/index.js';
+import { statSync } from 'node:fs';
 import { leanState } from './state/snapshot.js';
 import { batteries } from './questions/index.js';
 import { launchPolicy } from './policy/launch.js';
@@ -32,6 +33,8 @@ import { createRecorder } from './research/recorder.js';
 import { isMain, flag } from './config/main.js';
 
 const TOTAL_SUPPLY = 1_000_000_000;
+let appliedSettings = 0;
+const settingsVersion = () => appliedSettings;
 
 function mergeDeep(a, b) {
   if (typeof a !== 'object' || a === null || Array.isArray(a) || typeof b !== 'object' || b === null || Array.isArray(b)) return b ?? a;
@@ -410,7 +413,7 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
 
   function writeStatus(extra = {}) {
     const o = book.open;
-    log.status(STATUS, { runner: STATUS, profile, mode, rpc: process.env.SOLANA_RPC_URL ? 'custom' : 'public', feed: 'PumpPortal new tokens + Solana RPC', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, realized_optimistic_usd: stats.realized_usd_optimistic, sol_usd: sol, pending: pending.size, counters: stats,
+    log.status(STATUS, { runner: STATUS, profile, mode, settings_version: settingsVersion(), rpc: process.env.SOLANA_RPC_URL ? 'custom' : 'public', feed: 'PumpPortal new tokens + Solana RPC', judge: process.env.JUDGE_URL ? 'http judge' : 'mock judge', model_pin: cfg.model_version_pin, halted: risk.halted || decider.halted || null, realized_today_usd: risk.realizedToday, realized_optimistic_usd: stats.realized_usd_optimistic, sol_usd: sol, pending: pending.size, counters: stats,
       ...(() => {
         // Open profit and risk on the pessimistic ledger (the one the headline uses).
         const pp = o ? pessBroker.position(o.market) : null;
@@ -423,7 +426,14 @@ export function createSolanaDesk({ profile = 'strict', mode = 'paper', cfg: base
       open: o ? [{ bot: BOT, lead_id: o.lead_id, market: o.market, symbol: o.display?.symbol ?? null, side: 'buy', entry_price_sol: o.entry_price_sol, held_s: Math.round((now() - o.opened_ms) / 1000) }] : [], ...extra });
   }
 
-  return { profile, ghost: Boolean(ghostOf), cfg, onLaunch, scan, confirmPending, manageExit, resolveOutcomes, runSpotchecks, writeStatus, stats, risk, book, pending, broker, pessBroker };
+  /** Apply new settings in place (dashboard Settings panel). Open positions keep running under the new exit rules. */
+  function reconfigure(newBase) {
+    const S2 = profile === 'strict' ? newBase.solana : mergeDeep(newBase.solana, newBase.solana_profiles?.[profile] ?? {});
+    for (const k of Object.keys(S2)) { if (S2[k] && typeof S2[k] === 'object' && !Array.isArray(S2[k]) && S[k] && typeof S[k] === 'object') Object.assign(S[k], S2[k]); else S[k] = S2[k]; }
+    Object.assign(riskCfg.risk, { ...newBase.risk, ...S2.risk_overrides, ...(ghostOf ? { daily_loss_limit_usd: 1e9 } : {}) });
+  }
+
+  return { profile, ghost: Boolean(ghostOf), cfg, reconfigure, onLaunch, scan, confirmPending, manageExit, resolveOutcomes, runSpotchecks, writeStatus, stats, risk, book, pending, broker, pessBroker };
 }
 
 // ---------------------------------------------------------------- entrypoint
@@ -449,6 +459,16 @@ if (isMain(import.meta.url)) {
   const stop = () => { stopping = true; feed.stop(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   const loop = async (fn, ms, name) => { while (!stopping) { const t = Date.now(); try { await fn(); } catch (e) { console.log(`${name} error: ${e.message}`); } const end = Date.now() + Math.max(250, ms - (Date.now() - t)); while (!stopping && Date.now() < end) await new Promise((r) => setTimeout(r, Math.min(500, end - Date.now()))); } };
+  // Settings from the dashboard: re-read the settings file when it changes and apply it to every desk in place.
+  const settingsMtime = () => { try { return statSync(SETTINGS_FILE).mtimeMs; } catch { return 0; } };
+  appliedSettings = settingsMtime();
+  const watchSettings = async () => {
+    const m = settingsMtime(); if (m === appliedSettings) return;
+    const next = loadConfig();
+    for (const d of desks) d.reconfigure(next);
+    appliedSettings = m;
+    console.log(new Date().toISOString(), 'settings    ', 'applied new settings from the dashboard');
+  };
   let beats = 0, feedDownSince = null, feedAlerted = false, lastDay = new Date().toISOString().slice(0, 10);
   const watch = async () => {
     // Feed health → alert once when down 2+ min, once when back.
@@ -480,6 +500,7 @@ if (isMain(import.meta.url)) {
       loop(d.resolveOutcomes, 15000, `${d.profile} outcomes`),
     ]),
     loop(heartbeat, 10000, 'heartbeat'),
+    loop(watchSettings, 5000, 'settings'),
     ...(research ? [loop(research.tick, 5000, 'research')] : []),
   ]);
 }
