@@ -187,3 +187,16 @@
 {"ts":1793576787958,"bot":"launch_ghost","lead_id":"S-4R2e72PZ-mvyh7ahl","market":"4R2e72PZjPfC9PV2mbpvGjMLu2HnRDk87Mi4jtK8pump","question":"momentum","p":0.98,"y":1}
 {"ts":1793576850939,"bot":"launch_loose_ghost","lead_id":"SL-86unFbYq-mvyh8qa0","market":"86unFbYqATUgk6CE5qg2pL3FjrfGcdCpuYSivbgYpump","question":"momentum","p":0.98,"y":0}
 {"ts":1793576998000,"bot":"launch_loose_ghost","lead_id":"SL-GRccSjv1-mvyhbqui","market":"GRccSjv1SYb16Dpmg9zZRTKNY1Zdw8R5Qb1A8XuKpump","question":"momentum","p":0.98,"y":0}
+{"ts":1793577043025,"bot":"launch_loose_ghost","lead_id":"SL-BtfUfb1d-mvyhc6fe","market":"BtfUfb1dkhiJnJ9gieU64AkmcSL8rdFhSgvATUPTpump","question":"momentum","p":0.98,"y":0}
+{"ts":1793577148067,"bot":"launch_loose_ghost","lead_id":"SL-23zKdkEV-mvyh4gyp","market":"23zKdkEVQ3tvSzF3xQRsUSKuimu6jEGP5Eb9pwabpump","question":"rug","p":0.07371333780739274,"y":1}
+{"ts":1793577273024,"bot":"launch_loose_ghost","lead_id":"SL-4R2e72PZ-mvyh7ahl","market":"4R2e72PZjPfC9PV2mbpvGjMLu2HnRDk87Mi4jtK8pump","question":"rug","p":0.02,"y":1}
+{"ts":1793577273156,"bot":"launch_ghost","lead_id":"S-4R2e72PZ-mvyh7ahl","market":"4R2e72PZjPfC9PV2mbpvGjMLu2HnRDk87Mi4jtK8pump","question":"rug","p":0.02,"y":1}
+{"ts":1793577273288,"bot":"launch_loose_ghost","lead_id":"SL-5bVj1Amd-mvyhhqlj","market":"5bVj1AmdRcB3J9vvCzZ51i4o5zdtfMAUxXBi81Hdpump","question":"momentum","p":0.98,"y":1}
+{"ts":1793577305144,"bot":"launch_loose_ghost","lead_id":"SL-EAu7C4RU-mvyhi8a8","market":"EAu7C4RUPtFWG1G2vUBQPJufEiXX4Z5mmuadjEsKpump","question":"momentum","p":0.98,"y":1}
+{"ts":1793577305267,"bot":"launch_ghost","lead_id":"S-EAu7C4RU-mvyhi8a8","market":"EAu7C4RUPtFWG1G2vUBQPJufEiXX4Z5mmuadjEsKpump","question":"momentum","p":0.98,"y":1}
+{"ts":1793577343190,"bot":"launch_loose_ghost","lead_id":"SL-86unFbYq-mvyh8qa0","market":"86unFbYqATUgk6CE5qg2pL3FjrfGcdCpuYSivbgYpump","question":"rug","p":0.026185882788371258,"y":1}
+{"ts":1793577373165,"bot":"launch_loose_ghost","lead_id":"SL-Bz8nSLYS-mvyhjmll","market":"Bz8nSLYSheN8cNpn9pRreW51ZQrxwgNwGo9U5yeqpump","question":"momentum","p":0.98,"y":1}
+{"ts":1793577433713,"bot":"launch_loose_ghost","lead_id":"SL-Bd11q7PG-mvyhjeej","market":"Bd11q7PGghGL9qxWJjZ3eY5uvMB4iyXeVDnqPfTXpump","question":"momentum","p":0.931502396275674,"y":0}
+{"ts":1793577463280,"bot":"launch_loose_ghost","lead_id":"SL-46unX9NU-mvyhlnth","market":"46unX9NUPmfyAx6TwtGzHZvDMVN3CfUx8vyAzyrJpump","question":"momentum","p":0.98,"y":0}
+{"ts":1793577478270,"bot":"launch_loose_ghost","lead_id":"SL-GRccSjv1-mvyhbqui","market":"GRccSjv1SYb16Dpmg9zZRTKNY1Zdw8R5Qb1A8XuKpump","question":"rug","p":0.07900088648479893,"y":1}
+{"ts":1793577523291,"bot":"launch_loose_ghost","lead_id":"SL-BtfUfb1d-mvyhc6fe","market":"BtfUfb1dkhiJnJ9gieU64AkmcSL8rdFhSgvATUPTpump","question":"rug","p":0.023157652221516414,"y":0}
