@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mocertii Capital · MemeScout desk</title>
+<style>
+.viz-root {
+  color-scheme: dark;
+  --bg: #070a10; --card: #0e131c; --card-2: #121925; --line: rgba(255,255,255,0.07); --grid: rgba(255,255,255,0.06); --axis: rgba(255,255,255,0.16);
+  --text-primary: #eef0f4; --text-secondary: #b5bcc9; --muted: #8a93a3;
+  --gold: #d6a84e;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
+  --up: #3fcf8e; --warning: #fab219; --critical: #ef6b6b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #070a10; }
+.viz-root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text-primary); min-height: 100vh; padding: 18px 22px 48px; font-size: 13.5px;
+  background: radial-gradient(1200px 520px at 18% -8%, #141b29 0%, var(--bg) 62%); }
+.mono { font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; min-width: 0; position: relative; }
+.eyebrow { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.pos { color: var(--up); } .neg { color: var(--critical); }
+
+.top { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 6px 4px 16px; }
+.brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+.logo { width: 38px; height: 38px; border-radius: 9px; border: 1px solid rgba(214,168,78,.45); display: grid; place-items: center; background: #16120a; }
+.brand .name { color: var(--gold); font-weight: 750; letter-spacing: .16em; font-size: 13px; }
+.brand .sub { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+.clock .v { font-size: 13px; margin-top: 2px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .08em; border: 1px solid; }
+.pill .d { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.live { color: var(--up); border-color: rgba(63,207,142,.35); background: rgba(63,207,142,.08); }
+.pill.warn { color: var(--warning); border-color: rgba(250,178,25,.35); background: rgba(250,178,25,.08); }
+.pill.down { color: var(--critical); border-color: rgba(239,107,107,.35); background: rgba(239,107,107,.08); }
+.btn { font: inherit; font-size: 12px; background: var(--card); color: var(--text-primary); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.btn:hover { border-color: rgba(255,255,255,.18); }
+.user { color: var(--muted); font-size: 12px; }
+
+.strip { display: grid; grid-template-columns: repeat(4, 1fr) 1.25fr; gap: 12px; margin-bottom: 12px; }
+@media (max-width: 1100px) { .strip { grid-template-columns: repeat(2, 1fr); } }
+.svc .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.svc .title { font-weight: 600; font-size: 13px; }
+.chip { font-size: 9.5px; letter-spacing: .1em; font-weight: 700; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.chip.live { color: var(--up); border-color: rgba(63,207,142,.3); } .chip.warn { color: var(--warning); border-color: rgba(250,178,25,.3); } .chip.down { color: var(--critical); border-color: rgba(239,107,107,.3); }
+.svc .big { font-size: 17px; margin-top: 8px; }
+.svc .note { font-size: 11px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notice { border-color: rgba(214,168,78,.35); background: linear-gradient(180deg, rgba(214,168,78,.08), rgba(214,168,78,.02)); }
+.notice .title { font-weight: 650; }
+.notice ul { margin: 6px 0 0; padding-left: 16px; color: var(--text-secondary); font-size: 11.5px; line-height: 1.5; }
+
+.acct { display: grid; grid-template-columns: 1.15fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+@media (max-width: 1100px) { .acct { grid-template-columns: 1fr 1fr; } .acct .hero { grid-column: span 2; grid-row: auto; } }
+.hero { grid-row: span 2; display: flex; flex-direction: column; overflow: hidden; }
+.hero::after { content: ""; position: absolute; right: -60px; top: -60px; width: 220px; height: 220px; background: radial-gradient(circle, rgba(214,168,78,.10), transparent 70%); pointer-events: none; }
+.hero .value { font-size: 40px; font-weight: 600; margin: 10px 0 8px; letter-spacing: -.01em; }
+.delta { display: inline-flex; gap: 8px; padding: 3px 9px; border-radius: 7px; font-size: 12px; width: fit-content; }
+.delta.up { color: var(--up); background: rgba(63,207,142,.10); } .delta.down { color: var(--critical); background: rgba(239,107,107,.10); } .delta.flat { color: var(--muted); background: rgba(255,255,255,.05); }
+.hero .since { color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+.subtiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: auto; padding-top: 16px; }
+.subtile { background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.subtile .v { font-size: 13px; margin-top: 3px; }
+.tile .value { font-size: 22px; margin-top: 8px; }
+.tile .note { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+.bar { height: 4px; border-radius: 3px; background: rgba(255,255,255,.08); margin-top: 8px; overflow: hidden; }
+.bar > i { display: block; height: 100%; border-radius: 3px; }
+
+.row2 { display: grid; grid-template-columns: 1.9fr 1fr; gap: 12px; margin-bottom: 12px; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(12, 1fr); }
+.span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-6 { grid-column: span 6; } .span-4 { grid-column: span 4; }
+@media (max-width: 1100px) { .row2 { grid-template-columns: 1fr; } .span-8, .span-6, .span-4 { grid-column: span 12; } }
+.cardhead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.cardhead h2 { font-size: 13.5px; margin: 0; font-weight: 650; }
+.cardhead .aside { color: var(--muted); font-size: 11.5px; }
+.cardhead .right { margin-left: auto; }
+.seg { display: inline-flex; background: var(--card-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+.seg button { font: inherit; font-size: 11px; background: none; border: 0; color: var(--muted); padding: 3px 9px; border-radius: 6px; cursor: pointer; }
+.seg button.on { background: rgba(214,168,78,.18); color: var(--gold); font-weight: 650; }
+.dials { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+.dial { text-align: center; }
+.dial .lbl { font-weight: 600; font-size: 12.5px; margin-top: -4px; }
+.dial .cap { color: var(--muted); font-size: 10.5px; margin-top: 2px; line-height: 1.35; }
+.section { display: flex; align-items: center; gap: 14px; margin: 22px 2px 12px; flex-wrap: wrap; }
+.section h3 { margin: 0; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
+.section label { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+select { font: inherit; font-size: 12px; background: var(--card); color: var(--text-primary); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; color: var(--text-secondary); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.scroll { max-height: 360px; overflow: auto; }
+.tag { display: inline-block; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--line); font-size: 11px; white-space: nowrap; color: var(--text-primary); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-secondary); margin-bottom: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+.legend i.box { width: 10px; height: 10px; border-radius: 2px; }
+.legend i.dash { background: repeating-linear-gradient(90deg, var(--c) 0 5px, transparent 5px 8px) !important; }
+svg text { fill: var(--muted); font-size: 10.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tooltip { position: fixed; pointer-events: none; background: #151c29; border: 1px solid rgba(255,255,255,.12); border-radius: 9px; padding: 8px 10px; font-size: 12px; box-shadow: 0 8px 26px rgba(0,0,0,.5); z-index: 10; display: none; min-width: 150px; }
+.tooltip .t { color: var(--muted); margin-bottom: 4px; }
+.tooltip .r { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.tooltip .r strong { color: var(--text-primary); font-family: ui-monospace, Menlo, monospace; }
+.tooltip .r span { color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+.tooltip .r i { width: 12px; height: 2px; display: inline-block; }
+.empty { color: var(--muted); padding: 26px 0; text-align: center; font-size: 12.5px; }
+.loading { opacity: .6; transition: opacity .2s; }
+details summary { cursor: pointer; color: var(--muted); font-size: 11.5px; margin-top: 8px; }
+.cal { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.cal .q { font-size: 12px; font-weight: 600; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal .m { font-size: 11px; color: var(--muted); }
+.kpi4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+@media (max-width: 900px) { .kpi4 { grid-template-columns: repeat(2, 1fr); } }
+.mini { background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.mini .v { font-size: 18px; margin-top: 4px; }
+.mini .n { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.stage { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 650; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.stage.waiting { color: var(--muted); } .stage.rejected, .stage.expired { color: var(--text-secondary); } .stage.judged { color: #8fb8f0; }
+.stage.picked, .stage.bought { color: var(--up); border-color: rgba(63,207,142,.35); } .stage.sold { color: var(--gold); border-color: rgba(214,168,78,.35); }
+a.lnk { color: var(--gold); text-decoration: none; font-size: 11.5px; } a.lnk:hover { text-decoration: underline; }
+dialog#settings { width: min(920px, 96vw); max-height: 90vh; padding: 18px 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,.12); background: #0e131c; color: var(--text-primary); box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+dialog#settings::backdrop { background: rgba(3,5,9,.7); }
+.setbody { max-height: 62vh; overflow: auto; }
+.setbody table td { vertical-align: middle; }
+.setbody .grp td { color: var(--gold); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; padding-top: 14px; border-bottom: 1px solid var(--line); }
+.setbody input { width: 110px; font: inherit; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; background: #0a0e15; color: var(--text-primary); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; text-align: right; }
+.setbody input:focus { outline: 2px solid rgba(214,168,78,.5); }
+.setbody input.changed { border-color: var(--gold); }
+.setbody input.bad { border-color: var(--critical); }
+.setbody .unit { color: var(--muted); font-size: 11px; margin-left: 6px; }
+.setbody .def { color: var(--muted); font-size: 11px; }
+.setfoot { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+.btn.primary { background: var(--gold); color: #17120a; border-color: var(--gold); font-weight: 700; }
+.setmsg { margin-top: 10px; font-size: 12.5px; min-height: 18px; }
+.warnrow { display: flex; gap: 6px; font-size: 11px; color: var(--text-secondary); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="viz-root" id="root">
+  <div class="top">
+    <div class="brand">
+      <div class="logo"><svg width="22" height="18" viewBox="0 0 22 18" aria-hidden="true"><path d="M2 16V2l9 9 9-9v14" fill="none" stroke="#d6a84e" stroke-width="2.2" stroke-linejoin="round"/></svg></div>
+      <div><div class="name" id="acctName">MOCERTII CAPITAL</div><div class="sub" id="acctSub">MemeScout desk · paper trading</div></div>
+    </div>
+    <div class="clock"><div class="eyebrow">UK time</div><div class="v mono" id="ukTime">—</div></div>
+    <div class="clock"><div class="eyebrow">Server · UTC</div><div class="v mono" id="utcTime">—</div></div>
+    <div class="clock"><div class="eyebrow">Last update</div><div class="v mono" id="lastUpdate">—</div></div>
+    <span class="pill warn" id="livePill"><span class="d"></span><span id="liveText">LOADING</span></span>
+    <button class="btn" id="openSettings" type="button">⚙ Settings</button>
+    <span class="user" id="who"></span>
+    <form method="post" action="/logout" id="logoutForm" style="display:none"><button class="btn" type="submit">Sign out</button></form>
+  </div>
+
+  <div class="strip" id="strip"></div>
+  <div class="acct" id="acct"></div>
+
+  <div class="row2">
+    <div class="card">
+      <div class="cardhead"><h2>Equity curve</h2><span class="cardhead aside mono" id="rangeDelta" style="margin:0"></span>
+        <div class="right seg" id="rangeSeg"><button data-r="3600000">1H</button><button data-r="86400000">1D</button><button data-r="604800000">1W</button><button data-r="0" class="on">All</button></div></div>
+      <div id="equityChart"></div>
+      <details><summary>View as table</summary><div class="scroll" id="equityTable"></div></details>
+    </div>
+    <div class="card">
+      <div class="cardhead"><h2>Risk limits</h2><span class="right aside">risk engine vs alert levels</span></div>
+      <div class="dials" id="dials"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Desk activity</h3>
+    <label>Day <select id="day"></select></label>
+    <label>Bot
+      <select id="bot">
+        <option value="all">All bots</option><option value="gambler">Gambler</option><option value="house">House</option>
+        <option value="spy">Spy (synthetic)</option><option value="launch">Solana launches</option><option value="launch_loose">Solana launches (loose)</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="auto" checked> Auto-refresh 5s</label>
+  </div>
+
+  <div id="body" class="grid">
+    <div class="card span-12"><div class="cardhead"><h2>Live launches · Solana</h2><div class="seg" id="profileSeg" style="display:none"><button data-p="solana" class="on">Strict</button><button data-p="solana-loose">Loose</button></div><span class="aside">newest first · each launch waits ~45 s, then goes through the funnel</span><span class="right aside mono" id="launchCounts"></span></div>
+      <div class="scroll" id="launches" style="max-height:420px"></div></div>
+    <div class="card span-8"><div class="cardhead"><h2>P/L by bot (cumulative, after fees)</h2></div><div class="legend" id="pnlLegend"></div><div id="pnlChart"></div>
+      <details><summary>View as table</summary><div class="scroll" id="pnlTable"></div></details></div>
+    <div class="card span-4"><div class="cardhead"><h2>Open positions</h2></div><div id="positions"></div></div>
+    <div class="card span-8"><div class="cardhead"><h2>Decisions per minute</h2><span class="aside mono" id="latency"></span></div><div class="legend" id="dpmLegend"></div><div id="dpmChart"></div>
+      <details><summary>View as table</summary><div class="scroll" id="dpmTable"></div></details></div>
+    <div class="card span-4"><div class="cardhead"><h2>Funnel rejections</h2><span class="aside">why candidates were dropped</span></div><div id="rejChart"></div></div>
+    <div class="card span-12" id="ghostCard"><div class="cardhead"><h2>While halted · what it would have done</h2>
+      <span class="aside">when a desk hits its daily loss limit, a ghost copy keeps trading by the same rules. Not counted in equity, P/L or limits.</span></div>
+      <div class="kpi4" id="ghostKpis" style="grid-template-columns:repeat(2,1fr)"></div><div class="scroll" id="ghostTable"></div></div>
+    <div class="card span-12"><div class="cardhead"><h2>Spot-check · paper fills vs real on-chain trades</h2>
+      <span class="aside">±15 s on the same bonding curve · flattery = how much better paper was than reality (pessimistic should be ≤ 0)</span></div>
+      <div class="kpi4" id="spotKpis"></div><div class="scroll" id="spotTable"></div></div>
+    <div class="card span-6"><div class="cardhead"><h2>Risk engine vetoes</h2></div><div id="vetoes"></div></div>
+    <div class="card span-6"><div class="cardhead"><h2>Policy outcomes</h2></div><div id="intents"></div></div>
+    <div class="card span-12"><div class="cardhead"><h2>Recent decisions</h2><span class="aside">every judge answer travels with the decision</span></div><div class="scroll" id="decisions"></div></div>
+    <div class="card span-6"><div class="cardhead"><h2>Recent paper trades</h2></div><div class="scroll" id="trades"></div></div>
+    <div class="card span-6"><div class="cardhead"><h2>Events &amp; alerts</h2></div><div class="scroll" id="events"></div></div>
+    <div class="card span-12"><div class="cardhead"><h2>Calibration</h2><span class="aside">does a 0.8 come true 80% of the time? dashed = perfect · dot size = samples</span></div><div class="cal" id="calibration"></div></div>
+  </div>
+  <dialog id="settings" aria-labelledby="setTitle">
+    <form method="dialog" id="setForm">
+      <div class="cardhead" style="margin-bottom:6px"><h2 id="setTitle">Settings</h2>
+        <span class="aside">paper trading only · saved changes apply to the running desks within ~10 s, no restart</span>
+        <button class="btn right" value="cancel" type="submit" aria-label="Close">✕</button></div>
+      <div id="setBody" class="setbody"></div>
+      <div class="setmsg" id="setMsg" role="status"></div>
+      <div class="setfoot">
+        <button class="btn" type="button" id="setReset">Reset all to defaults</button>
+        <span style="flex:1"></span>
+        <button class="btn" value="cancel" type="submit">Cancel</button>
+        <button class="btn primary" type="button" id="setSave">Save changes</button>
+      </div>
+    </form>
+  </dialog>
+  <div class="tooltip" id="tip"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const SVGNS = 'http://www.w3.org/2000/svg';
+const BOT_COLOR = { gambler: 'var(--series-1)', house: 'var(--series-2)', launch: 'var(--series-3)', spy: 'var(--series-3)', 'launch:optimistic': 'var(--series-4)', launch_loose: 'var(--series-5)' };
+const BOT_NAME = { gambler: 'Gambler', house: 'House', launch: 'Solana (pessimistic)', spy: 'Spy', 'launch:optimistic': 'Solana (optimistic)', launch_loose: 'Solana LOOSE (pessimistic)' };
+const DASHED = (bot) => bot.endsWith(':optimistic');
+let timer = null, first = true, last = null, range = 0;
+
+function el(tag, attrs = {}, ...kids) {
+  const n = tag.startsWith('svg:') ? document.createElementNS(SVGNS, tag.slice(4)) : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) (k === 'class' && !tag.startsWith('svg:')) ? n.className = v : n.setAttribute(k, v);
+  for (const k of kids) n.append(k instanceof Node ? k : document.createTextNode(k ?? ''));
+  return n;
+}
+const fmtUsd = (x, dp = 2) => x == null || !Number.isFinite(x) ? '—' : (x < 0 ? '−$' : '$') + Math.abs(x).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+const fmtSigned = (x) => x == null || !Number.isFinite(x) ? '—' : (x > 0 ? '+' : x < 0 ? '−' : '') + '$' + Math.abs(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtPct = (x, dp = 2) => x == null || !Number.isFinite(x) ? '—' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(dp) + '%';
+const cls = (x) => (x > 0 ? 'pos' : x < 0 ? 'neg' : '');
+const fmtTime = (t) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const short = (s, n = 10) => !s ? '—' : s.length > n ? s.slice(0, n) + '…' : s;
+const ago = (t) => { const s = Math.max(0, Math.round((Date.now() - t) / 1000)); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`; };
+
+function tickClocks() {
+  const now = new Date();
+  $('ukTime').textContent = now.toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  $('utcTime').textContent = now.toLocaleString('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  if (last) $('lastUpdate').textContent = ago(last.generated_at);
+}
+setInterval(tickClocks, 1000); tickClocks();
+
+function tip(e, title, rows) {
+  const t = $('tip'); t.replaceChildren(el('div', { class: 't' }, title));
+  for (const [label, value, color] of rows) {
+    const key = el('span'); if (color) { const i = el('i'); i.style.background = color; key.append(i); } key.append(label);
+    t.append(el('div', { class: 'r' }, key, el('strong', {}, value)));
+  }
+  t.style.display = 'block';
+  t.style.left = Math.min(window.innerWidth - t.offsetWidth - 12, e.clientX + 14) + 'px';
+  t.style.top = Math.min(window.innerHeight - t.offsetHeight - 12, e.clientY + 14) + 'px';
+}
+const hideTip = () => { $('tip').style.display = 'none'; };
+
+function table(cols, rows) {
+  if (!rows.length) return el('div', { class: 'empty' }, 'Nothing yet');
+  const t = el('table'), hr = el('tr');
+  for (const c of cols) hr.append(el('th', { class: c.num ? 'num' : null }, c.label));
+  t.append(el('thead', {}, hr));
+  const tb = el('tbody');
+  for (const r of rows) { const tr = el('tr'); for (const c of cols) { const v = c.get(r); tr.append(el('td', { class: [c.num ? 'num' : '', c.cls ?? ''].join(' ').trim() || null }, v instanceof Node ? v : String(v ?? '—'))); } tb.append(tr); }
+  t.append(tb); return t;
+}
+
+function runnerState(s) {
+  if (!s) return { label: 'OFF', k: '' };
+  const age = (Date.now() - s.ts) / 1000;
+  if (s.halted) return { label: 'HALTED', k: 'down' };
+  if (age >= 180) return { label: 'DOWN', k: 'down' };
+  if (age >= 30) return { label: 'STALE', k: 'warn' };
+  if (s.runner === 'solana' && !s.feed_connected) return { label: 'FEED DOWN', k: 'warn' };
+  return { label: 'LIVE', k: 'live' };
+}
+
+function svcCard(title, state, big, note, warn) {
+  return el('div', { class: 'card svc' },
+    el('div', { class: 'head' }, el('span', { class: 'title' }, title), el('span', { class: 'chip ' + state.k }, state.label)),
+    el('div', { class: 'big mono' }, big), el('div', { class: 'note', title: note }, note),
+    warn ? el('div', { class: 'warnrow' }, el('span', { style: 'color:var(--warning)' }, '▲'), warn) : '');
+}
+
+function renderStrip(d) {
+  const syn = d.statuses.find((s) => s.runner === 'synthetic'), sol = d.statuses.find((s) => s.runner === 'solana'), loose = d.statuses.find((s) => s.runner === 'solana-loose');
+  const any = d.statuses[0];
+  $('strip').replaceChildren(
+    svcCard('Solana scanner', runnerState(sol), sol ? `${sol.counters.launches_seen.toLocaleString()} seen` : '—', sol ? `${sol.pending} waiting · ${sol.counters.judged} judged · ${sol.counters.entries} entries` : 'start: npm run solana',
+      sol && !sol.feed_connected ? 'PumpPortal not connected' : sol && sol.rpc === 'public' && (sol.counters.rejections?.rpc_rate_limited ?? 0) >= 5 ? 'Free Solana RPC is throttling holder checks: set SOLANA_RPC_URL (Helius)' : loose ? `Loose desk also on: ${loose.counters.judged} judged · ${loose.counters.entries} entries · ${fmtSigned(loose.realized_today_usd)} (not in equity)` : null),
+    svcCard('Synthetic desk', runnerState(syn), syn ? `block ${syn.tick.toLocaleString()}` : 'off', syn ? `${syn.block_ms} ms blocks · generated prices` : 'demo with generated prices (optional)'),
+    svcCard('Judge', { label: any ? (any.judge === 'mock judge' ? 'MOCK' : 'JEV') : '—', k: any?.judge === 'mock judge' ? 'warn' : 'live' }, d.kpis.latency_p50 == null ? '—' : `${d.kpis.latency_p50} ms`, any ? `p95 ${d.kpis.latency_p95 ?? '—'} ms · pin ${any.model_pin}` : '',
+      any?.judge === 'mock judge' ? 'Rules, not Jev: proves plumbing only' : null),
+    svcCard('SOL / USD', { label: sol?.sol_usd?.source === 'jupiter' ? 'JUPITER' : 'FALLBACK', k: sol?.sol_usd?.source === 'jupiter' ? 'live' : 'warn' }, sol?.sol_usd ? fmtUsd(sol.sol_usd.price) : '—', sol?.sol_usd?.source === 'jupiter' ? 'live price feed' : 'config fallback price'),
+    el('div', { class: 'card notice' }, el('div', { class: 'title' }, 'Paper trading only'),
+      el('ul', {}, el('li', {}, 'No keys, no signing, no live broker.'), el('li', {}, 'Headline P/L uses the pessimistic ledger.'), el('li', {}, 'Crypto trades 24/7; daily limits reset 00:00 UTC.'))),
+  );
+  const states = [sol, syn].filter(Boolean).map(runnerState).filter((x) => x.k);
+  const worst = states.find((s) => s.k === 'down') ?? states.find((s) => s.k === 'warn') ?? states[0] ?? { label: 'NO RUNNERS', k: 'down' };
+  $('livePill').className = 'pill ' + worst.k; $('liveText').textContent = worst.k === 'live' ? 'LIVE' : worst.label;
+}
+
+function renderAccount(a) {
+  $('acctName').textContent = a.name.toUpperCase(); $('acctSub').textContent = a.subtitle;
+  const tot = a.total_pnl_usd, totPct = (tot / a.start_usd) * 100;
+  const tile = (label, value, note, valueCls, extra) => el('div', { class: 'card tile' }, el('div', { class: 'eyebrow' }, label), el('div', { class: 'value mono ' + (valueCls ?? '') }, value), el('div', { class: 'note' }, note), extra ?? '');
+  const riskCapPct = a.limits.exposure.limit_usd ? (a.open_risk_usd / a.limits.exposure.limit_usd) * 100 : 0;
+  const fill = el('i'); fill.style.width = Math.min(100, riskCapPct) + '%'; fill.style.background = riskCapPct > 80 ? 'var(--critical)' : riskCapPct > 50 ? 'var(--warning)' : 'var(--gold)';
+  $('acct').replaceChildren(
+    el('div', { class: 'card hero' },
+      el('div', { class: 'eyebrow' }, 'Equity'),
+      el('div', { class: 'value mono' }, fmtUsd(a.equity_usd)),
+      el('span', { class: 'delta mono ' + (tot > 0 ? 'up' : tot < 0 ? 'down' : 'flat') }, el('span', {}, fmtSigned(tot)), el('span', {}, fmtPct(totPct))),
+      el('div', { class: 'since' }, `since the ${fmtUsd(a.start_usd, 0)} paper start`),
+      el('div', { class: 'subtiles' },
+        el('div', { class: 'subtile' }, el('div', { class: 'eyebrow' }, 'Exposure'), el('div', { class: 'v mono' }, fmtUsd(a.exposure_usd))),
+        el('div', { class: 'subtile' }, el('div', { class: 'eyebrow' }, 'Free cash'), el('div', { class: 'v mono' }, fmtUsd(a.free_usd, 0))),
+        el('div', { class: 'subtile' }, el('div', { class: 'eyebrow' }, 'Leverage'), el('div', { class: 'v mono' }, '1:1 · none')))),
+    tile('Balance', fmtUsd(a.balance_usd), `${a.closed_trades} closed trade${a.closed_trades === 1 ? '' : 's'} · win rate ${a.win_rate == null ? '—' : Math.round(a.win_rate * 100) + '%'}`),
+    tile('Floating P/L', fmtSigned(a.floating_usd), `${a.open_positions} open position${a.open_positions === 1 ? '' : 's'}`, cls(a.floating_usd)),
+    tile("Today's P/L", fmtSigned(a.today_pnl_usd), `${fmtPct(a.day_start_usd ? (a.today_pnl_usd / a.day_start_usd) * 100 : 0)} of day-start ${fmtUsd(a.day_start_usd, 0)}`, cls(a.today_pnl_usd)),
+    tile('Total P/L since start', fmtSigned(tot), `${fmtPct(totPct)} vs ${fmtUsd(a.start_usd, 0)} start`, cls(tot)),
+    tile('Drawdown from peak', `${a.drawdown_pct.toFixed(2)}%`, `${fmtUsd(a.drawdown_usd)} below peak ${fmtUsd(a.peak_usd)}`),
+    tile('Open risk', fmtUsd(a.open_risk_usd), `lost if every stop is hit · cap ${fmtUsd(a.limits.exposure.limit_usd, 0)}`, '', el('div', { class: 'bar' }, fill)),
+  );
+}
+
+function axisTicks(min, max, n = 4) {
+  if (min === max) { min -= 1; max += 1; }
+  const step = Math.pow(10, Math.floor(Math.log10((max - min) / n))); const err = (max - min) / n / step;
+  const s = step * (err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1);
+  const ticks = []; for (let v = Math.floor(min / s) * s; v <= max + s * 0.5; v += s) ticks.push(+v.toFixed(10));
+  return ticks;
+}
+const timeLabel = (t, span) => new Date(t).toLocaleString('en-GB', span > 86400000 ? { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' } : span < 600000 ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+
+function equityChart(host, pts, start) {
+  host.replaceChildren();
+  if (range) { const cut = Date.now() - range; const before = pts.filter((p) => p[0] < cut).at(-1); pts = [...(before ? [[cut, before[1]]] : []), ...pts.filter((p) => p[0] >= cut)]; }
+  if (pts.length < 2 || pts.every((p) => p[1] === pts[0][1])) { host.append(el('div', { class: 'empty' }, pts.length < 2 ? 'No closed trades in this range yet' : 'No closed trades yet. The curve starts with the first paper sell.')); $('rangeDelta').textContent = ''; $('equityTable').replaceChildren(); return; }
+  const d0 = pts[pts.length - 1][1] - pts[0][1];
+  $('rangeDelta').replaceChildren(el('span', { class: cls(d0) }, fmtSigned(d0)), ' over this range');
+  const W = host.clientWidth || 800, H = 250, L = 8, R = 92, T = 10, B = 24;
+  const x0 = pts[0][0], x1 = Math.max(pts.at(-1)[0], x0 + 1);
+  const ys = pts.map((p) => p[1]).concat([start]);
+  const ticks = axisTicks(Math.min(...ys), Math.max(...ys), 5); const y0 = ticks[0], y1 = ticks.at(-1);
+  const X = (t) => L + ((t - x0) / (x1 - x0)) * (W - L - R), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+  const svg = el('svg:svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Equity curve' });
+  const defs = el('svg:defs'); const g = el('svg:linearGradient', { id: 'eqfill', x1: 0, y1: 0, x2: 0, y2: 1 });
+  g.append(el('svg:stop', { offset: '0%', 'stop-color': '#d6a84e', 'stop-opacity': '0.28' }), el('svg:stop', { offset: '100%', 'stop-color': '#d6a84e', 'stop-opacity': '0' }));
+  defs.append(g); svg.append(defs);
+  for (const v of ticks) { svg.append(el('svg:line', { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: 'var(--grid)' })); svg.append(el('svg:text', { x: W - R + 8, y: Y(v) + 4 }, fmtUsd(v))); }
+  if (start >= y0 && start <= y1) svg.append(el('svg:line', { x1: L, x2: W - R, y1: Y(start), y2: Y(start), stroke: 'var(--axis)', 'stroke-dasharray': '3 4' }));
+  let line = ''; pts.forEach(([t, v], i) => { line += i ? `H${X(t).toFixed(1)}V${Y(v).toFixed(1)}` : `M${X(t).toFixed(1)},${Y(v).toFixed(1)}`; });
+  svg.append(el('svg:path', { d: `${line}V${Y(y0)}H${X(x0)}Z`, fill: 'url(#eqfill)' }));
+  svg.append(el('svg:path', { d: line, fill: 'none', stroke: '#d6a84e', 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+  for (let i = 0; i <= 4; i++) { const t = x0 + ((x1 - x0) * i) / 4; svg.append(el('svg:text', { x: X(t), y: H - 6, 'text-anchor': i === 0 ? 'start' : i === 4 ? 'end' : 'middle' }, timeLabel(t, x1 - x0))); }
+  const cross = el('svg:line', { y1: T, y2: H - B, stroke: 'var(--axis)', visibility: 'hidden' }), dot = el('svg:circle', { r: 4, fill: '#d6a84e', stroke: '#0e131c', 'stroke-width': 2, visibility: 'hidden' });
+  svg.append(cross, dot);
+  const hit = el('svg:rect', { x: L, y: T, width: W - L - R, height: H - T - B, fill: 'transparent' });
+  hit.addEventListener('pointermove', (e) => {
+    const r = svg.getBoundingClientRect(); const t = x0 + ((e.clientX - r.left - L) / (W - L - R)) * (x1 - x0);
+    let v = pts[0][1]; for (const [pt, pv] of pts) if (pt <= t) v = pv;
+    cross.setAttribute('x1', X(t)); cross.setAttribute('x2', X(t)); cross.setAttribute('visibility', 'visible');
+    dot.setAttribute('cx', X(t)); dot.setAttribute('cy', Y(v)); dot.setAttribute('visibility', 'visible');
+    tip(e, timeLabel(t, 1e9), [['Equity', fmtUsd(v), '#d6a84e'], ['vs start', fmtSigned(v - start)]]);
+  });
+  hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); hideTip(); });
+  svg.append(hit); host.append(svg);
+  $('equityTable').replaceChildren(table([{ label: 'time', get: (p) => timeLabel(p[0], 1e9) }, { label: 'equity', num: true, get: (p) => fmtUsd(p[1]) }], [...pts].reverse().slice(0, 300)));
+}
+
+function dial(label, used, limit, enforced) {
+  const frac = limit > 0 ? used / limit : 0, pct = frac * 100;
+  const S = 112, cx = S / 2, cy = S / 2 + 4, r = 40, a0 = Math.PI * 0.75, sweep = Math.PI * 1.5;
+  const pt = (a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  const arc = (from, to) => { const [x1, y1] = pt(from), [x2, y2] = pt(to); return `M${x1},${y1} A${r},${r} 0 ${to - from > Math.PI ? 1 : 0} 1 ${x2},${y2}`; };
+  const color = frac >= 0.8 ? 'var(--critical)' : frac >= 0.5 ? 'var(--warning)' : 'var(--up)';
+  const state = frac >= 0.8 ? 'Near limit' : frac >= 0.5 ? 'Watch' : 'OK';
+  const svg = el('svg:svg', { width: S, height: S - 10, viewBox: `0 0 ${S} ${S - 10}`, role: 'img', 'aria-label': `${label} ${pct.toFixed(1)}% of limit` });
+  svg.append(el('svg:path', { d: arc(a0, a0 + sweep), fill: 'none', stroke: 'rgba(255,255,255,.08)', 'stroke-width': 7, 'stroke-linecap': 'round' }));
+  if (frac > 0) svg.append(el('svg:path', { d: arc(a0, a0 + sweep * Math.min(1, Math.max(0.01, frac))), fill: 'none', stroke: color, 'stroke-width': 7, 'stroke-linecap': 'round' }));
+  const [tx, ty] = pt(a0 + sweep); svg.append(el('svg:line', { x1: tx - 5, y1: ty - 3, x2: tx + 5, y2: ty + 3, stroke: '#d6a84e', 'stroke-width': 2 }));
+  svg.append(el('svg:text', { x: cx, y: cy - 2, 'text-anchor': 'middle', style: 'fill:var(--text-primary);font-size:14px' }, pct.toFixed(2) + '%'));
+  svg.append(el('svg:text', { x: cx, y: cy + 13, 'text-anchor': 'middle', style: 'font-size:9px' }, `of ${fmtUsd(limit, 0)}`));
+  return el('div', { class: 'dial' }, svg, el('div', { class: 'lbl' }, label),
+    el('div', { class: 'cap' }, el('span', { style: `color:${color}` }, (frac >= 0.8 ? '■ ' : frac >= 0.5 ? '▲ ' : '● ') + state), ` · ${fmtUsd(used)} used`),
+    el('div', { class: 'cap' }, enforced ? 'enforced: desk halts / blocks' : 'alert level, not enforced'));
+}
+
+function lineChart(host, seriesMap, { height = 230, yFmt = fmtUsd } = {}) {
+  host.replaceChildren();
+  const series = Object.entries(seriesMap).filter(([, pts]) => pts.length);
+  if (!series.length) { host.append(el('div', { class: 'empty' }, 'No closed paper trades yet')); return; }
+  const W = host.clientWidth || 700, H = height, L = 64, T = 10, B = 24;
+  const longest = Math.max(...series.map(([bot, pts]) => `${BOT_NAME[bot] ?? bot} ${yFmt(pts.at(-1)[1])}`.length));
+  const R = Math.min(250, 14 + longest * 6.6);
+  const xs = series.flatMap(([, p]) => p.map((d) => d[0])), ys = series.flatMap(([, p]) => p.map((d) => d[1])).concat([0]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs, x0 + 1);
+  const ticks = axisTicks(Math.min(...ys), Math.max(...ys)); const y0 = ticks[0], y1 = ticks.at(-1);
+  const X = (t) => L + ((t - x0) / (x1 - x0)) * (W - L - R), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+  const svg = el('svg:svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Cumulative P/L by bot' });
+  for (const v of ticks) { svg.append(el('svg:line', { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: v === 0 ? 'var(--axis)' : 'var(--grid)' })); svg.append(el('svg:text', { x: L - 8, y: Y(v) + 4, 'text-anchor': 'end' }, yFmt(v))); }
+  for (let i = 0; i <= 4; i++) { const t = x0 + ((x1 - x0) * i) / 4; svg.append(el('svg:text', { x: X(t), y: H - 6, 'text-anchor': i === 0 ? 'start' : i === 4 ? 'end' : 'middle' }, timeLabel(t, x1 - x0))); }
+  const ends = [];
+  for (const [bot, pts] of series) {
+    let d = ''; [[x0, 0], ...pts].forEach(([t, v], i) => { d += i ? `H${X(t).toFixed(1)}V${Y(v).toFixed(1)}` : `M${X(t).toFixed(1)},${Y(v).toFixed(1)}`; });
+    svg.append(el('svg:path', { d, fill: 'none', stroke: BOT_COLOR[bot], 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-dasharray': DASHED(bot) ? '6 4' : null }));
+    ends.push({ bot, y: Y(pts.at(-1)[1]), v: pts.at(-1)[1] });
+  }
+  ends.sort((a, b) => a.y - b.y); for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 14);
+  for (const e of ends) svg.append(el('svg:text', { x: W - R + 8, y: e.y + 4, style: 'fill:var(--text-secondary)' }, `${BOT_NAME[e.bot] ?? e.bot} ${yFmt(e.v)}`));
+  const cross = el('svg:line', { y1: T, y2: H - B, stroke: 'var(--axis)', visibility: 'hidden' }); svg.append(cross);
+  const hit = el('svg:rect', { x: L, y: T, width: W - L - R, height: H - T - B, fill: 'transparent' });
+  hit.addEventListener('pointermove', (e) => {
+    const r = svg.getBoundingClientRect(); const t = x0 + ((e.clientX - r.left - L) / (W - L - R)) * (x1 - x0);
+    cross.setAttribute('x1', X(t)); cross.setAttribute('x2', X(t)); cross.setAttribute('visibility', 'visible');
+    tip(e, timeLabel(t, 1e9), series.map(([bot, pts]) => { let v = 0; for (const [pt, pv] of pts) if (pt <= t) v = pv; return [BOT_NAME[bot] ?? bot, yFmt(v), BOT_COLOR[bot]]; }));
+  });
+  hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); hideTip(); });
+  svg.append(hit); host.append(svg);
+}
+
+function stackedBars(host, rows, keys, { height = 190 } = {}) {
+  host.replaceChildren();
+  if (!rows.length) { host.append(el('div', { class: 'empty' }, 'No decisions yet')); return; }
+  const W = host.clientWidth || 700, H = height, L = 40, R = 8, T = 8, B = 24;
+  const max = Math.max(1, ...rows.map((r) => keys.reduce((s, k) => s + r[k.key], 0)));
+  const ticks = axisTicks(0, max, 3); const top = ticks.at(-1);
+  const bw = Math.max(2, (W - L - R) / rows.length - 2);
+  const Y = (v) => T + (1 - v / top) * (H - T - B);
+  const svg = el('svg:svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Decisions per minute' });
+  for (const v of ticks) { svg.append(el('svg:line', { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: v === 0 ? 'var(--axis)' : 'var(--grid)' })); svg.append(el('svg:text', { x: L - 6, y: Y(v) + 4, 'text-anchor': 'end' }, String(v))); }
+  rows.forEach((r, i) => {
+    const x = L + i * (bw + 2); let acc = 0; const g = el('svg:g');
+    keys.forEach((k, j) => {
+      const v = r[k.key]; if (!v) return;
+      const y1 = Y(acc), y2 = Y(acc + v); acc += v;
+      const isTop = keys.slice(j + 1).every((kk) => !r[kk.key]);
+      g.append(el('svg:rect', { x, y: y2, width: bw, height: Math.max(1, y1 - y2 - (isTop ? 0 : 2)), fill: k.color, rx: isTop ? Math.min(4, bw / 2) : 0 }));
+    });
+    const hit = el('svg:rect', { x: x - 1, y: T, width: bw + 2, height: H - T - B, fill: 'transparent' });
+    hit.addEventListener('pointermove', (e) => tip(e, timeLabel(r.t, 1e6), keys.map((k) => [k.label, String(r[k.key]), k.color])));
+    hit.addEventListener('pointerleave', hideTip);
+    g.append(hit); svg.append(g);
+  });
+  [0, rows.length - 1].forEach((i, n) => svg.append(el('svg:text', { x: L + i * (bw + 2) + (n ? bw : 0), y: H - 6, 'text-anchor': n ? 'end' : 'start' }, timeLabel(rows[i].t, 1e6))));
+  host.append(svg);
+}
+
+function hBars(host, pairs, { color = 'var(--series-1)', empty = 'Nothing rejected yet' } = {}) {
+  host.replaceChildren();
+  if (!pairs.length) { host.append(el('div', { class: 'empty' }, empty)); return; }
+  const W = host.clientWidth || 360, rowH = 22, labelW = 150, H = pairs.length * rowH + 4;
+  const max = Math.max(...pairs.map((p) => p[1]));
+  const svg = el('svg:svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Rejections by check' });
+  pairs.forEach(([label, v], i) => {
+    const y = i * rowH + 3, w = Math.max(2, ((W - labelW - 44) * v) / max);
+    svg.append(el('svg:text', { x: labelW - 8, y: y + 12, 'text-anchor': 'end', style: 'fill:var(--text-secondary);font-family:system-ui,sans-serif;font-size:11px' }, label.replaceAll('_', ' ')));
+    const bar = el('svg:rect', { x: labelW, y, width: w, height: rowH - 8, rx: 3, fill: color });
+    bar.addEventListener('pointermove', (e) => tip(e, label, [['count', String(v), color]])); bar.addEventListener('pointerleave', hideTip);
+    svg.append(bar, el('svg:text', { x: labelW + w + 6, y: y + 12, style: 'fill:var(--text-primary)' }, String(v)));
+  });
+  host.append(svg);
+}
+
+function reliability(q) {
+  const S = 170, P = 18, I = S - 2 * P;
+  const svg = el('svg:svg', { width: S, height: S, viewBox: `0 0 ${S} ${S}`, role: 'img', 'aria-label': 'Reliability for ' + q.question });
+  svg.append(el('svg:rect', { x: P, y: P, width: I, height: I, fill: 'none', stroke: 'var(--grid)' }));
+  svg.append(el('svg:line', { x1: P, y1: P + I, x2: P + I, y2: P, stroke: 'var(--axis)', 'stroke-dasharray': '4 4' }));
+  const maxC = Math.max(1, ...q.buckets.map((b) => b.count));
+  for (const b of q.buckets) {
+    if (!b.count) continue;
+    const dot = el('svg:circle', { cx: P + b.mean_p * I, cy: P + (1 - b.hit_rate) * I, r: 4 + 4 * Math.sqrt(b.count / maxC), fill: 'var(--series-1)', stroke: '#0e131c', 'stroke-width': 2 });
+    dot.addEventListener('pointermove', (e) => tip(e, q.question, [['said', b.mean_p.toFixed(2)], ['happened', b.hit_rate.toFixed(2)], ['samples', String(b.count)]]));
+    dot.addEventListener('pointerleave', hideTip);
+    svg.append(dot);
+  }
+  svg.append(el('svg:text', { x: P, y: S - 4 }, '0'), el('svg:text', { x: P + I, y: S - 4, 'text-anchor': 'end' }, 'said 1.0'));
+  return svg;
+}
+
+function legend(host, items, box) {
+  host.replaceChildren(...items.map(([label, color, dashed]) => { const i = el('i', { class: [box ? 'box' : '', dashed ? 'dash' : ''].join(' ').trim() || null }); i.style.background = color; i.style.setProperty('--c', color); return el('span', {}, i, label); }));
+}
+
+function render(d) {
+  last = d; tickClocks();
+  if (d.viewer?.login) { $('who').textContent = d.viewer.user; $('logoutForm').style.display = ''; }
+  const daySel = $('day'); const cur = daySel.value || d.day;
+  daySel.replaceChildren(...(d.days.length ? d.days : [d.day]).map((x) => el('option', { value: x }, x))); daySel.value = cur;
+
+  renderStrip(d);
+  renderAccount(d.account);
+  equityChart($('equityChart'), d.account.equity_curve, d.account.start_usd);
+  const L = d.account.limits;
+  $('dials').replaceChildren(dial('Daily loss', L.daily_loss.used_usd, L.daily_loss.limit_usd, true), dial('Exposure', L.exposure.used_usd, L.exposure.limit_usd, true),
+    dial('Max loss', L.max_loss.used_usd, L.max_loss.limit_usd, false), dial('From peak', L.drawdown.used_usd, L.drawdown.limit_usd, false));
+
+  const bots = Object.keys(d.pnl);
+  if (bots.length >= 2) legend($('pnlLegend'), bots.map((b) => [BOT_NAME[b] ?? b, BOT_COLOR[b], DASHED(b)])); else $('pnlLegend').replaceChildren();
+  lineChart($('pnlChart'), d.pnl);
+  $('pnlTable').replaceChildren(table([{ label: 'time', get: (r) => fmtTime(r[1]) }, { label: 'bot', get: (r) => BOT_NAME[r[0]] ?? r[0] }, { label: 'cumulative', num: true, get: (r) => fmtUsd(r[2]) }],
+    Object.entries(d.pnl).flatMap(([b, pts]) => pts.map(([t, v]) => [b, t, v])).sort((a, b) => b[1] - a[1]).slice(0, 200)));
+
+  $('latency').textContent = d.kpis.decisions ? `${d.kpis.decisions.toLocaleString()} decisions · ${d.kpis.fallbacks} fallbacks · ${d.kpis.vetoes} vetoes` : '';
+  const keys = [{ key: 'act', label: 'Acted (enter / quote)', color: 'var(--series-1)' }, { key: 'hold', label: 'Held / skipped', color: 'var(--series-2)' }, { key: 'fallback', label: 'Fallback', color: 'var(--series-3)' }];
+  legend($('dpmLegend'), keys.map((k) => [k.label, k.color]), true);
+  stackedBars($('dpmChart'), d.decisions_per_min, keys);
+  $('dpmTable').replaceChildren(table([{ label: 'minute', get: (r) => fmtTime(r.t) }, ...keys.map((k) => ({ label: k.label, num: true, get: (r) => r[k.key] }))], [...d.decisions_per_min].reverse()));
+  hBars($('rejChart'), d.rejections_by_check);
+
+  renderLaunches(d);
+
+  const g = d.ghost ?? { trades: [], totals: [], open: [] };
+  const gmini = (t) => el('div', { class: 'mini' }, el('div', { class: 'eyebrow' }, `${t.desk} · would have made`),
+    el('div', { class: 'v mono ' + cls(t.pessimistic_usd) }, fmtSigned(t.pessimistic_usd)),
+    el('div', { class: 'n' }, `${t.trades} trade${t.trades === 1 ? '' : 's'} · ${t.wins} won · best case ${fmtSigned(t.optimistic_usd)}`));
+  $('ghostKpis').replaceChildren(...g.totals.map(gmini));
+  const gopen = g.open.map((o) => ({ ts: null, desk: o.desk, symbol: o.symbol, mint: o.market, reason: `open · held ${o.held_s}s`, pessimistic_usd: null, optimistic_usd: null }));
+  const grow = [...gopen, ...g.trades];
+  $('ghostTable').replaceChildren(grow.length ? table([
+    { label: 'bought', get: (r) => (r.ts ? fmtTime(r.ts) : 'now') },
+    { label: 'desk', get: (r) => r.desk },
+    { label: 'coin', get: (r) => el('span', {}, el('b', { style: 'color:var(--text-primary)' }, r.symbol || '—'), el('span', { class: 'muted mono' }, `  ${short(r.mint, 6)}`)) },
+    { label: 'how it ended', get: (r) => String(r.reason ?? '').replaceAll('_', ' ') },
+    { label: 'would have made', num: true, get: (r) => (r.pessimistic_usd == null ? '—' : el('span', { class: cls(r.pessimistic_usd) }, fmtSigned(r.pessimistic_usd))) },
+    { label: 'best case', num: true, get: (r) => (r.optimistic_usd == null ? '—' : el('span', { class: cls(r.optimistic_usd) }, fmtSigned(r.optimistic_usd))) },
+    { label: 'look it up', get: (r) => (MINT_RE.test(r.mint ?? '') ? el('a', { class: 'lnk', href: `https://pump.fun/coin/${r.mint}`, target: '_blank', rel: 'noopener noreferrer' }, 'pump.fun') : '—') },
+  ], grow) : el('div', { class: 'empty' }, g.active ? 'No ghost trades yet. They only start while a desk is halted by its daily loss limit.' : 'Ghosts start with the next desk restart (npm run start:both).'));
+
+  const sc = d.spotcheck, bps = (x) => x == null ? '—' : `${x > 0 ? '+' : ''}${Math.round(x)} bps`;
+  const flatter = (x) => x == null ? el('span', {}, '—') : el('span', { class: x > 0 ? 'neg' : 'pos' }, (x > 0 ? '▲ ' : '▼ ') + bps(x));
+  const mini = (label, value, note) => el('div', { class: 'mini' }, el('div', { class: 'eyebrow' }, label), el('div', { class: 'v mono' }, value), el('div', { class: 'n' }, note));
+  $('spotKpis').replaceChildren(
+    mini('Fills checked', `${sc.with_real_trades} / ${sc.checked}`, 'with real trades in window'),
+    mini('Optimistic flattery', flatter(sc.median_optimistic_bps), 'median · how much the ceiling overstates'),
+    mini('Pessimistic flattery', flatter(sc.median_pessimistic_bps), 'median · should be ≤ 0'),
+    mini('Pessimistic too kind', sc.pessimistic_too_kind_share == null ? '—' : `${Math.round(sc.pessimistic_too_kind_share * 100)}%`, 'of fills · if high, harden config'));
+  $('spotTable').replaceChildren(sc.recent.length ? table([
+    { label: 'fill', get: (r) => fmtTime(r.ts) }, { label: 'token', cls: 'mono', get: (r) => short(r.market, 10) }, { label: 'side', get: (r) => r.side },
+    { label: 'real trades', num: true, get: (r) => r.n }, { label: 'real median', num: true, get: (r) => r.real_median_price_sol?.toExponential(3) ?? '—' },
+    { label: 'optimistic', num: true, get: (r) => r.optimistic_price_sol?.toExponential(3) ?? '—' }, { label: 'flattery', num: true, get: (r) => flatter(r.optimistic_bps) },
+    { label: 'pessimistic', num: true, get: (r) => r.pessimistic_price_sol?.toExponential(3) ?? '—' }, { label: 'flattery', num: true, get: (r) => flatter(r.pessimistic_bps) },
+  ], sc.recent) : el('div', { class: 'empty' }, 'No Solana fills checked yet. Checks run 60 s after each paper fill and need the live feed + RPC.'));
+
+  $('vetoes').replaceChildren(d.vetoes_by_rule.length ? table([{ label: 'rule', get: (r) => r[0] }, { label: 'times fired', num: true, get: (r) => r[1] }], d.vetoes_by_rule) : el('div', { class: 'empty' }, 'No vetoes fired'));
+  $('intents').replaceChildren(table([{ label: 'bot · intent', get: (r) => r[0] }, { label: 'count', num: true, get: (r) => r[1] }], d.intents));
+
+  const open = d.statuses.flatMap((s) => s.open ?? []);
+  $('positions').replaceChildren(open.length ? table([
+    { label: 'bot', get: (r) => BOT_NAME[r.bot] ?? r.bot },
+    { label: 'market', cls: 'mono', get: (r) => r.symbol ? `${r.symbol} ${short(r.market, 8)}` : short(r.market, 14) },
+    { label: 'side', get: (r) => r.side + (r.note ? ` (${r.note})` : '') },
+    { label: 'detail', get: (r) => r.resting_orders != null ? `${r.resting_orders} resting` : r.held_s != null ? `held ${r.held_s}s` : r.entry ? `entry ${r.entry.toFixed(4)} · mark ${r.mark.toFixed(4)}` : '' },
+  ], open) : el('div', { class: 'empty' }, 'Flat. No open positions'));
+
+  $('decisions').replaceChildren(table([
+    { label: 'time', get: (r) => fmtTime(r.ts) }, { label: 'bot', get: (r) => BOT_NAME[r.bot] ?? r.bot },
+    { label: 'market', cls: 'mono', get: (r) => r.symbol ? `${r.symbol} ${short(r.market, 6)}` : short(r.market ?? r.lead_id, 12) },
+    { label: 'decision', get: (r) => el('span', { class: 'tag' }, r.intent) }, { label: 'why', get: (r) => r.why },
+    { label: 'judge answers', cls: 'mono', get: (r) => r.answers ? Object.entries(r.answers).map(([k, v]) => `${k}=${v}`).join('  ') : '—' },
+    { label: 'ms', num: true, get: (r) => r.latency_ms },
+  ], d.recent_decisions));
+
+  $('trades').replaceChildren(table([
+    { label: 'time', get: (r) => fmtTime(r.ts) }, { label: 'bot', get: (r) => BOT_NAME[r.bot] ?? r.bot },
+    { label: 'market', cls: 'mono', get: (r) => short(r.market, 12) }, { label: 'side', get: (r) => r.side },
+    { label: 'status', get: (r) => r.status + (r.ledger ? ` · ${r.ledger}` : '') },
+    { label: 'size', num: true, get: (r) => r.notional_usd == null ? '—' : fmtUsd(r.notional_usd) },
+    { label: 'realized', num: true, get: (r) => { const v = r.realized_usd; return v == null ? '—' : el('span', { class: cls(v) }, fmtSigned(v)); } },
+  ], d.recent_trades));
+
+  $('events').replaceChildren(table([
+    { label: 'time', get: (r) => fmtTime(r.ts) },
+    { label: 'type', get: (r) => r.type === 'alert' ? el('span', { style: 'color:var(--critical)' }, '■ alert') : r.type + (r.ledger ? ` · ${r.ledger}` : '') },
+    { label: 'detail', get: (r) => r.msg ?? r.reason ?? r.kind ?? (r.lead_id ? `${r.lead_id}${r.realized_usd != null ? ' · ' + fmtSigned(r.realized_usd) : ''}` : '') },
+  ], d.recent_events));
+
+  const cal = $('calibration'); cal.replaceChildren();
+  if (!d.calibration.length) cal.append(el('div', { class: 'empty' }, 'Not enough resolved outcomes yet (needs 5+ per question)'));
+  for (const q of d.calibration) cal.append(el('div', {}, el('div', { class: 'q', title: q.question }, q.question), el('div', { class: 'm' }, `n=${q.n} · Brier ${q.brier.toFixed(3)} · gap ${q.ece.toFixed(3)}`), reliability(q)));
+}
+
+const MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const STAGE_ICON = { waiting: '◷', rejected: '✕', expired: '–', judged: '?', picked: '★', bought: '●', sold: '◆' };
+let launchProfile = 'solana';
+function renderLaunches(d) {
+  const hasLoose = d.statuses.some((s) => s.runner === 'solana-loose');
+  $('profileSeg').style.display = hasLoose ? '' : 'none';
+  if (!hasLoose) launchProfile = 'solana';
+  const sol = d.statuses.find((s) => s.runner === launchProfile);
+  const rows = sol?.recent_launches ?? [];
+  const by = rows.reduce((m, r) => ((m[r.stage] = (m[r.stage] ?? 0) + 1), m), {});
+  $('launchCounts').textContent = rows.length ? Object.entries(by).map(([k, v]) => `${v} ${k}`).join(' · ') : '';
+  $('launches').replaceChildren(rows.length ? table([
+    { label: 'launched', get: (r) => el('span', {}, fmtTime(r.received_at), el('span', { class: 'muted' }, ` · ${ago(r.received_at)}`)) },
+    { label: 'token', get: (r) => el('span', {}, el('b', { style: 'color:var(--text-primary)' }, r.symbol || '—'), el('span', { class: 'muted' }, r.name ? `  ${short(r.name, 28)}` : '')) },
+    { label: 'stage', get: (r) => el('span', { class: 'stage ' + r.stage }, `${STAGE_ICON[r.stage] ?? ''} ${r.stage}`) },
+    { label: 'what happened', get: (r) => String(r.detail ?? '').replaceAll('_', ' ') },
+    { label: 'mint', cls: 'mono', get: (r) => short(r.mint, 8) },
+    { label: 'look it up', get: (r) => MINT_RE.test(r.mint) ? el('span', {}, el('a', { class: 'lnk', href: `https://pump.fun/coin/${r.mint}`, target: '_blank', rel: 'noopener noreferrer' }, 'pump.fun'), '  ', el('a', { class: 'lnk', href: `https://solscan.io/token/${r.mint}`, target: '_blank', rel: 'noopener noreferrer' }, 'solscan')) : '—' },
+  ], rows) : el('div', { class: 'empty' }, sol ? 'Waiting for the first launch…' : 'Start the scanner: npm run solana'));
+}
+
+// ---------- Settings panel ----------
+let settingsData = null;
+async function openSettings() {
+  $('setMsg').textContent = '';
+  try {
+    const r = await fetch('/api/settings', { credentials: 'same-origin' });
+    if (r.status === 401) { location.href = '/login'; return; }
+    settingsData = await r.json();
+  } catch { $('setMsg').textContent = 'Could not load settings.'; }
+  renderSettings();
+  $('settings').showModal();
+}
+function renderSettings() {
+  const d = settingsData; if (!d) return;
+  const t = el('table'), head = el('tr', {}, el('th', {}, 'Setting'), el('th', { class: 'num' }, 'Strict'), el('th', { class: 'num' }, 'Loose'), el('th', {}, 'Default (strict / loose)'));
+  t.append(el('thead', {}, head));
+  const tb = el('tbody'); let group = null;
+  for (const f of d.fields) {
+    if (f.group !== group) { group = f.group; tb.append(el('tr', { class: 'grp' }, el('td', { colspan: 4 }, group))); }
+    const cell = (profile) => {
+      const cur = d.profiles[profile][f.key];
+      const inp = el('input', { type: 'number', step: 'any', min: f.min, max: f.max, value: cur.value, 'data-p': profile, 'data-k': f.key, 'aria-label': `${f.label} (${profile})` });
+      inp.addEventListener('input', () => { const v = Number(inp.value); inp.classList.toggle('changed', inp.value !== '' && v !== cur.value); inp.classList.toggle('bad', inp.value === '' || v < f.min || v > f.max); });
+      return el('td', { class: 'num' }, inp, el('span', { class: 'unit' }, f.unit));
+    };
+    tb.append(el('tr', {}, el('td', {}, f.label, el('div', { class: 'def' }, `allowed ${f.min}–${f.max}${f.unit === '%' ? '%' : f.unit ? ' ' + f.unit : ''}`)), cell('strict'), cell('loose'),
+      el('td', { class: 'def' }, `${d.profiles.strict[f.key].default} / ${d.profiles.loose[f.key].default}${f.unit === '%' ? '%' : f.unit ? ' ' + f.unit : ''}`)));
+  }
+  t.append(tb); $('setBody').replaceChildren(t);
+}
+async function postSettings(body) {
+  const r = await fetch('/api/settings', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-desk-settings': '1' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.href = '/login'; return null; }
+  if (!r.ok) { $('setMsg').replaceChildren(el('span', { style: 'color:var(--critical)' }, '■ ' + (j.errors?.join(' · ') || j.error || 'Could not save.'))); return null; }
+  return j;
+}
+function showSaved(j, label) {
+  settingsData = j.settings; renderSettings();
+  const lines = j.diff.length ? j.diff.map((x) => `${x.desk}: ${x.setting} ${x.from} → ${x.to}`).join(' · ') : 'nothing changed';
+  $('setMsg').replaceChildren(el('span', { style: 'color:var(--up)' }, `● ${label}: ${lines}. The running desks pick this up within ~10 s.`));
+}
+$('openSettings').addEventListener('click', openSettings);
+$('setSave').addEventListener('click', async () => {
+  const changes = {};
+  for (const inp of $('setBody').querySelectorAll('input.changed')) { if (inp.classList.contains('bad')) { $('setMsg').replaceChildren(el('span', { style: 'color:var(--critical)' }, '■ Fix the fields outlined in red first.')); return; } (changes[inp.dataset.p] ??= {})[inp.dataset.k] = Number(inp.value); }
+  if (!Object.keys(changes).length) { $('setMsg').textContent = 'No changes to save.'; return; }
+  const j = await postSettings({ changes }); if (j) showSaved(j, 'Saved');
+});
+$('setReset').addEventListener('click', async () => {
+  if (!window.confirm('Reset every setting on both desks to the defaults?')) return;
+  const j = await postSettings({ reset: true }); if (j) showSaved(j, 'Reset to defaults');
+});
+
+async function load() {
+  const body = $('body'); if (!first) body.classList.add('loading');
+  const qs = new URLSearchParams({ bot: $('bot').value }); if ($('day').value) qs.set('day', $('day').value);
+  try {
+    const r = await fetch('/api/summary?' + qs, { credentials: 'same-origin' });
+    if (r.status === 401) { location.href = '/login'; return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    render(await r.json()); first = false;
+  } catch (e) { $('liveText').textContent = 'API UNREACHABLE'; $('livePill').className = 'pill down'; }
+  finally { body.classList.remove('loading'); }
+}
+function schedule() { clearInterval(timer); if ($('auto').checked) timer = setInterval(load, 5000); }
+$('rangeSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; range = Number(b.dataset.r); for (const x of $('rangeSeg').children) x.classList.toggle('on', x === b); if (last) equityChart($('equityChart'), last.account.equity_curve, last.account.start_usd); });
+$('profileSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; launchProfile = b.dataset.p; for (const x of $('profileSeg').children) x.classList.toggle('on', x === b); if (last) renderLaunches(last); });
+$('bot').addEventListener('change', load);
+$('day').addEventListener('change', load);
+$('auto').addEventListener('change', schedule);
+window.addEventListener('resize', () => { clearTimeout(window._rz); window._rz = setTimeout(() => last && render(last), 200); });
+load(); schedule();
+</script>
+</body>
+</html>

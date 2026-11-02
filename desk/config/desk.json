@@ -1,0 +1,207 @@
+{
+  "_comment": "Every threshold the desk acts on lives here. Edit numbers, not prompts.",
+  "mode_default": "shadow",
+  "block_ms": 400,
+  "decision_deadline_ms": 350,
+  "model_version_pin": "jev-1.13.0",
+  "state_token_budget": 400,
+  "risk": {
+    "max_position_usd_per_market": 250,
+    "max_position_usd_total": 250,
+    "daily_loss_limit_usd": 50,
+    "max_leverage": 1,
+    "min_edge_over_costs_bps": 5,
+    "fee_bps": 10,
+    "min_fee_usd": 0,
+    "_min_fee_note": "Set to your venue minimum. A $20 entry against a $0.95 minimum fee loses 4.75% before price moves.",
+    "gas_usd_per_order": 0.02,
+    "exit_volume_pace_ratio": 0.2,
+    "exit_close_within_ms": 60000,
+    "exit_data_retries": 2,
+    "consecutive_error_halt": 5
+  },
+  "gambler": {
+    "enter_regimes": [
+      "trending"
+    ],
+    "min_setup_score": 2,
+    "min_action_prob": {
+      "long": 0.7,
+      "short": 0.75
+    },
+    "max_exec_degraded_prob": 0.4,
+    "min_buy_pressure_for_long": 0.6,
+    "ticket_usd": 100,
+    "stop_bps": 40,
+    "take_bps": 80
+  },
+  "house": {
+    "grid_levels": 12,
+    "grid_step_bps": 50,
+    "level_size_usd": 20,
+    "pause_breakout_prob": 0.35,
+    "widen_toxic_prob": 0.5,
+    "pull_toxic_prob": 0.75,
+    "min_environment_score": 1.5,
+    "kill_volume_dead_prob": 0.3,
+    "as_gamma": 0.1,
+    "as_kappa": 1.5,
+    "as_horizon_s": 60
+  },
+  "spy": {
+    "mirror_labels": [
+      "skilled"
+    ],
+    "min_skilled_prob": 0.65,
+    "min_consistent_prob": 0.6,
+    "max_rug_prob": 0.2,
+    "full_ticket_usd": 100,
+    "partial_ticket_usd": 40,
+    "unknown_ticket_scale": 0.5,
+    "max_signal_age_ms": 15000,
+    "max_hold_ticks": 150
+  },
+  "funnel": {
+    "min_liquidity_usd": 5000,
+    "min_volume_5m_usd": 1000,
+    "max_top10_holder_pct": 60,
+    "min_age_s": 60,
+    "max_jev_candidates": 5
+  },
+  "bench_ttl_ms": {
+    "honeypot": -1,
+    "mint_authority_open": -1,
+    "freeze_authority_open": -1,
+    "liquidity_unlocked": 3600000,
+    "too_young": 1200000,
+    "low_liquidity": 900000,
+    "low_volume": 600000,
+    "concentration": 1800000,
+    "jev_rug": 7200000,
+    "jev_not_worth_it": 1800000,
+    "default": 1800000,
+    "stale_signal": -1,
+    "creator_heavy_buy": -1,
+    "curve_missing": 300000,
+    "curve_complete": -1,
+    "whale": 1800000,
+    "no_inflow": 600000,
+    "enrich_failed": 0,
+    "over_jev_cap": 60000,
+    "judge_unavailable": 60000,
+    "low_market_cap": 600000,
+    "risky_token_extension": -1,
+    "non_sol_quote": -1,
+    "rpc_rate_limited": 0,
+    "holders_unavailable": 0,
+    "not_pump_pool": -1,
+    "mayhem_mode": -1,
+    "serial_launcher": -1,
+    "late_curve": -1,
+    "faded_before_entry": -1,
+    "no_fresh_curve": 60000
+  },
+  "solana": {
+    "_comment": "Spy launch scanner on real pump.fun launches. Paper only. Amounts in USD are converted at the live SOL price (Jupiter), falling back to sol_usd_fallback.",
+    "sol_usd_fallback": 150,
+    "risk_overrides": {
+      "fee_bps": 125,
+      "min_fee_usd": 0,
+      "gas_usd_per_order": 0.1,
+      "max_position_usd_per_market": 25,
+      "max_position_usd_total": 25,
+      "daily_loss_limit_usd": 60
+    },
+    "ticket_usd": 20,
+    "take_bps": 3000,
+    "stop_bps": 1500,
+    "max_hold_ms": 600000,
+    "scan_interval_ms": 15000,
+    "exit_poll_ms": 2000,
+    "min_age_s": 45,
+    "max_age_s": 300,
+    "max_pending": 500,
+    "max_enrich_per_cycle": 8,
+    "max_jev_candidates": 3,
+    "max_creator_initial_buy_pct": 10,
+    "min_market_cap_usd": 6000,
+    "max_top10_pct": 35,
+    "max_largest_holder_pct": 10,
+    "min_inflow_sol": 2,
+    "policy": {
+      "max_rug_prob": 0.25,
+      "min_quality": 1.8,
+      "min_momentum_prob": 0.6,
+      "ok_kinds": [
+        "organic"
+      ],
+      "unknown_ticket_scale": 0.5
+    },
+    "outcomes": {
+      "momentum_horizon_ms": 120000,
+      "rug_horizon_ms": 600000,
+      "rug_drawdown": 0.5
+    },
+    "pessimistic": {
+      "_comment": "Second paper ledger that assumes things go wrong. Risk limits use THIS ledger.",
+      "entry_delay_ms": 1500,
+      "exit_delay_ms": 1500,
+      "front_run_sol": 0.15,
+      "extra_slippage_bps": 100,
+      "fail_rate": 0.15,
+      "priority_fee_sol": 0.001,
+      "exit_max_failures": 3,
+      "_calibration": "2026-11-01: lowered from 0.5 SOL / 300 bps after the first live day: spot-checks showed pessimistic fills 14.7% worse than real trades (optimistic 5.3% worse). Re-check the spot-check card; pessimistic should stay at or below 0."
+    },
+    "spotcheck": {
+      "delay_ms": 60000,
+      "window_ms": 15000,
+      "max_tx": 12
+    },
+    "partial_fraction": 0.5,
+    "trail_activate_bps": 1500,
+    "trail_bps": 1000,
+    "_exits_comment": "stop at -stop_bps; at +take_bps sell partial_fraction (0 or 1 = sell all); after the peak reaches +trail_activate_bps, close the rest if price falls trail_bps from the peak; max_hold_ms time stop.",
+    "allow_mayhem": false,
+    "serial_window_ms": 600000,
+    "max_launches_per_creator": 2,
+    "allow_unknown_holders": false,
+    "max_state_drift_bps": 1000,
+    "max_transient_retries": 3,
+    "max_curve_progress_pct": 55,
+    "confirm_ms": 15000,
+    "confirm_max_drop_bps": 500,
+    "_live_tuning_2026_11_01": "From 44 live paper trades: exits polled every 2 s (stops were filling ~28% below entry at 5 s); no entries above 55% curve progress (0 wins in 9); a pick must hold within -5% for 15 s before entry (most stops fired 3-10 s after a hot entry)."
+  },
+  "account": {
+    "_comment": "Paper account shown on the dashboard. Daily loss and position caps are ENFORCED by each runner's risk engine; the two alert levels below are display-only warnings.",
+    "name": "MOCERTII CAPITAL",
+    "subtitle": "MemeScout desk \u00b7 paper trading",
+    "paper_start_usd": 1000,
+    "alert_max_loss_pct": 10,
+    "alert_drawdown_pct": 10
+  },
+  "solana_profiles": {
+    "_comment": "Extra paper desks that run beside the strict one (enable with --loose or DESK_LOOSE=1). Each is fully independent; its trades are tagged launch_loose and kept out of the account equity. Only thresholds change; scam checks (mint/freeze authority open, graduated curve) are never relaxed.",
+    "loose": {
+      "max_creator_initial_buy_pct": 20,
+      "min_market_cap_usd": 4000,
+      "min_inflow_sol": 1,
+      "max_top10_pct": 50,
+      "max_largest_holder_pct": 15,
+      "max_jev_candidates": 5,
+      "max_enrich_per_cycle": 10,
+      "policy": {
+        "max_rug_prob": 0.4,
+        "min_quality": 1.4,
+        "min_momentum_prob": 0.5,
+        "ok_kinds": [
+          "organic",
+          "bundled"
+        ]
+      },
+      "allow_unknown_holders": true,
+      "max_curve_progress_pct": 65
+    }
+  }
+}

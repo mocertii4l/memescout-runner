@@ -16,3 +16,45 @@ services:
         value: "15000"
       - key: SCALP_INTERVAL_MS
         value: "5000"
+  # Paper-only desk: Solana launch scanner + login-protected dashboard (desk/).
+  # Holds no wallet or exchange keys. Check the displayed price before creating it.
+  - type: web
+    name: memescout-desk
+    runtime: docker
+    plan: 0.5c-512mb
+    region: frankfurt
+    numInstances: 1
+    dockerfilePath: ./desk/Dockerfile
+    dockerContext: ./desk
+    healthCheckPath: /healthz
+    disk:
+      name: desk-logs
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DASHBOARD_USER
+        sync: false
+      - key: DASHBOARD_PASSWORD_HASH
+        sync: false
+      - key: SOLANA_RPC_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: DISCORD_WEBHOOK_URL
+        sync: false
+      - key: DESK_LOG_DIR
+        value: /var/data/logs
+      - key: DESK_SETTINGS_FILE
+        value: /var/data/settings.json
+      - key: DASHBOARD_TRUST_PROXY
+        value: "1"
+      - key: DASHBOARD_SECURE_COOKIE
+        value: "1"
+      - key: DESK_MODE
+        value: paper
+      - key: DESK_RUN_SYNTHETIC
+        value: "0"
+      - key: DESK_LOOSE
+        value: "0"

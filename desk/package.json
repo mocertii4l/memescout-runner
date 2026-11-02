@@ -1,0 +1,29 @@
+{
+  "name": "memescout-desk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Paper-only AI trading desk skeleton: code calculates, Jev judges, risk engine vetoes, paper broker executes.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "judge": "node judge/server.js",
+    "shadow": "node runner.js --mode=shadow",
+    "paper": "node runner.js --mode=paper",
+    "report:calibration": "node reports/calibration.js",
+    "report:daily": "node reports/daily.js",
+    "test": "node --test test/*.test.js",
+    "solana": "node solana-runner.js --mode=paper",
+    "solana:shadow": "node solana-runner.js --mode=shadow",
+    "dashboard": "node dashboard/server.js",
+    "dashboard:password": "node dashboard/auth.js",
+    "solana:both": "node solana-runner.js --mode=paper --loose",
+    "start": "node start.mjs",
+    "start:both": "node start.mjs --loose --share-logs",
+    "check": "node tools/check.mjs",
+    "backup": "node tools/backup.mjs",
+    "share-logs": "node tools/sync-logs.mjs",
+    "backtest": "node tools/backtest.mjs"
+  }
+}

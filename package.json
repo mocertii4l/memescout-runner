@@ -1,0 +1,16 @@
+{
+  "name": "memescout-runner",
+  "private": true,
+  "description": "Convenience: run the desk's commands from the repo root. Everything lives in desk/.",
+  "scripts": {
+    "start": "npm --prefix desk run start",
+    "start:both": "npm --prefix desk run start:both",
+    "check": "npm --prefix desk run check",
+    "report:daily": "npm --prefix desk run report:daily",
+    "backup": "npm --prefix desk run backup",
+    "dashboard:password": "npm --prefix desk run dashboard:password",
+    "test": "npm --prefix desk test",
+    "share-logs": "npm --prefix desk run share-logs",
+    "backtest": "npm --prefix desk run backtest"
+  }
+}
