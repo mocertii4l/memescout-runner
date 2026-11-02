@@ -10,6 +10,7 @@
     "backup": "npm --prefix desk run backup",
     "dashboard:password": "npm --prefix desk run dashboard:password",
     "test": "npm --prefix desk test",
-    "share-logs": "npm --prefix desk run share-logs"
+    "share-logs": "npm --prefix desk run share-logs",
+    "backtest": "npm --prefix desk run backtest"
   }
 }

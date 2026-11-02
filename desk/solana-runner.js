@@ -27,6 +27,8 @@ import { rowsFor } from './outcomes/resolvers.js';
 import { fetchRealTrades, compareFill } from './feeds/spotcheck.js';
 import { createNotifier, fmt as alertFmt } from './alerts/notify.js';
 import { readStream } from './reports/read.js';
+import { holderStats } from './research/holders.js';
+import { createRecorder } from './research/recorder.js';
 import { isMain, flag } from './config/main.js';
 
 const TOTAL_SUPPLY = 1_000_000_000;
@@ -55,17 +57,7 @@ export function createCachedRpc(rpc, { ttlMs = 2500, now = () => Date.now() } = 
 }
 const MIGRATION_RESERVE = 206_900_000; // tokens the curve account keeps for migration
 
-/** Holder stats excluding the bonding curve's own token account. */
-export function holderStats(holders, curve) {
-  if (!holders?.length) return { top10_pct: null, largest_holder_pct: null, holders_seen: 0, curve_account_found: false };
-  const expectedCurve = curve?.realTokenReserves != null ? Number(curve.realTokenReserves) / 1e6 + MIGRATION_RESERVE : null;
-  let idx = expectedCurve ? holders.findIndex((h) => Math.abs(h.amount - expectedCurve) / expectedCurve < 0.01) : -1;
-  const found = idx >= 0;
-  if (!found) idx = 0; // fall back: the curve is almost always the largest holder during bonding
-  const rest = holders.filter((_, i) => i !== idx).filter((h) => h.amount > 0);
-  const pct = (x) => Number(((x / TOTAL_SUPPLY) * 100).toFixed(2));
-  return { top10_pct: pct(rest.slice(0, 10).reduce((s, h) => s + h.amount, 0)), largest_holder_pct: pct(rest[0]?.amount ?? 0), holders_seen: rest.length, curve_account_found: found };
-}
+export { holderStats };
 
 export function buildLaunchState(c, now = Date.now()) {
   return {
@@ -450,7 +442,8 @@ if (isMain(import.meta.url)) {
   const desks = [createSolanaDesk({ profile: 'strict', mode, cfg, judge, rpc, notify })];
   if (loose) desks.push(createSolanaDesk({ profile: 'loose', mode, cfg, judge, rpc, notify }));
   for (const real of [...desks]) desks.push(createSolanaDesk({ profile: real.profile, mode, cfg, judge, rpc, ghostOf: real }));
-  const feed = connectPumpPortal({ onLaunch: (l) => { for (const d of desks) d.onLaunch(l); }, onStatus: (s) => console.log(new Date().toISOString(), s.type, s.retry_ms ?? '') });
+  const research = process.env.DESK_RESEARCH === '0' ? null : createRecorder({ rpc, log: createLogger() });
+  const feed = connectPumpPortal({ onLaunch: (l) => { for (const d of desks) d.onLaunch(l); research?.onLaunch({ ...l }); }, onStatus: (s) => console.log(new Date().toISOString(), s.type, s.retry_ms ?? '') });
   console.log(`solana launch desk mode=${mode} profiles=${desks.filter((d) => !d.ghost).map((d) => d.profile).join('+')} (+ ghosts that trade only while halted) rpc=${process.env.SOLANA_RPC_URL ? 'custom' : 'public mainnet'} — paper only, never signs`);
   let stopping = false;
   const stop = () => { stopping = true; feed.stop(); };
@@ -473,6 +466,7 @@ if (isMain(import.meta.url)) {
     await watch();
     for (const d of desks) d.writeStatus({ feed_connected: feed.connected, feed_last_message_at: feed.lastMessageAt });
     if ((beats = (beats + 1) % 6) !== 1) return; // status every 10 s, console line every minute
+    if (research) console.log(new Date().toISOString(), 'research    ', JSON.stringify({ tracking: research.tracking, recorded: research.stats.finished, ends: research.stats.ends }));
     for (const d of desks) {
       const s = d.stats, o = d.book.open;
       if (d.ghost && !s.scanned && !o) continue; // ghost lines only once a ghost has something to say
@@ -486,5 +480,6 @@ if (isMain(import.meta.url)) {
       loop(d.resolveOutcomes, 15000, `${d.profile} outcomes`),
     ]),
     loop(heartbeat, 10000, 'heartbeat'),
+    ...(research ? [loop(research.tick, 5000, 'research')] : []),
   ]);
 }

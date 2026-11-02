@@ -130,6 +130,28 @@ You get:
 
 Messages are plain text, and Discord mentions are disabled (token names are attacker-controlled).
 
+### Research recorder + backtest
+
+The live runner also records the **price path of every plausible launch** without trading it:
+- it skips the same spam both desks cut (mayhem, serial launchers, non-pump pools, heavy creator buys), and tokens that never get any buying
+- samples every 5 s for 3 minutes, then every 15 s up to 20 minutes, or until graduation or death
+- takes one holder snapshot once a token shows 1 SOL of real buying
+- writes to `logs/data/research-*.jsonl`, which syncs with the other logs
+
+It costs one batched RPC call per 100 tokens every 5 s. Turn it off with `DESK_RESEARCH=0`.
+
+```bash
+npm run backtest                        # rank ~1,400 rule sets on the recorded tokens
+node tools/backtest.mjs path/to/logs    # or any folder of research-*.jsonl
+```
+
+The backtest is honest by construction:
+- **Fills:** entries fill at the next sample (~5 s late), and stops fill at the gap price.
+- **Costs:** curve price impact, 1.25% fee and 1% slippage each side, plus per-transaction fees.
+- **Overfitting check:** rules are ranked on the first 70% of tokens and reported on the last 30% they never saw.
+
+A rule set only matters if its **test** average is clearly above zero on a decent number of trades.
+
 ### While halted: ghost desks
 
 When a desk hits its daily loss limit, it stops trading until 00:00 UTC. A **ghost** copy of it, with the same rules, filters, confirmation and exits, then keeps paper trading so you can see what it would have done.

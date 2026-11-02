@@ -49,6 +49,20 @@ export function createRpc({ url = process.env.SOLANA_RPC_URL || 'https://api.mai
       return { mint_authority: info.mintAuthority ?? null, freeze_authority: info.freezeAuthority ?? null, supply: Number(info.supply) / 10 ** info.decimals, decimals: info.decimals,
         program: r.value.owner, extensions: (info.extensions ?? []).map((e) => e.extension) };
     },
+    /** Many curves in one call (up to 100 per request). Returns Map(key -> decoded curve | null). */
+    async curves(keys) {
+      const out = new Map();
+      for (let i = 0; i < keys.length; i += 100) {
+        const chunk = keys.slice(i, i + 100);
+        const r = await call('getMultipleAccounts', [chunk, { encoding: 'base64', commitment: 'confirmed' }]);
+        (r?.value ?? []).forEach((acc, j) => {
+          let c = null;
+          try { if (acc?.data?.[0]) c = decodeCurve(Buffer.from(acc.data[0], 'base64')); } catch {}
+          out.set(chunk[j], c);
+        });
+      }
+      return out;
+    },
     async curve(bondingCurve) {
       const r = await call('getAccountInfo', [bondingCurve, { encoding: 'base64', commitment: 'confirmed' }]);
       const b64 = r?.value?.data?.[0];

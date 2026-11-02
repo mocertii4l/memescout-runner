@@ -23,6 +23,7 @@
     "start:both": "node start.mjs --loose --share-logs",
     "check": "node tools/check.mjs",
     "backup": "node tools/backup.mjs",
-    "share-logs": "node tools/sync-logs.mjs"
+    "share-logs": "node tools/sync-logs.mjs",
+    "backtest": "node tools/backtest.mjs"
   }
 }
